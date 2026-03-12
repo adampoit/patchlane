@@ -1,0 +1,51 @@
+name: Sync Upstream Integration
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Skip push and PR operations.
+        type: boolean
+        required: false
+        default: true
+      upstream_ref:
+        description: Upstream branch ref to rebuild from when release_selector is blank.
+        type: string
+        required: false
+        default: main
+      release_selector:
+        description: Use `latest`, `prerelease`, or a regex for upstream tags. Leave blank to use upstream_ref.
+        type: string
+        required: false
+        default: latest
+      patch_refs:
+        description: Newline-delimited patch branch names applied in order.
+        type: string
+        required: false
+        default: |
+          patch/product
+          patch/sync
+          patch/ci
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fork-sync:
+    uses: your-org/patchlane/.github/workflows/patchlane.yml@v1
+    with:
+      upstream_owner: upstream-org
+      upstream_repo: upstream-repo
+      base_branch: main
+      upstream_ref: ${{ inputs.upstream_ref || 'main' }}
+      release_selector: ${{ inputs.release_selector || 'latest' }}
+      sync_branch: sync/integration
+      patch_refs: ${{ inputs.patch_refs || format('{0}\n{1}\n{2}', 'patch/product', 'patch/sync', 'patch/ci') }}
+      pr_labels: automated,upstream-sync
+      pr_title: Sync integration branch from {source}
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets:
+      token: ${{ secrets.FORK_SYNC_TOKEN }}
