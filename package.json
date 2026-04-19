@@ -1,16 +1,25 @@
 {
   "name": "patchlane",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Reusable GitHub Actions workflow for maintaining forked repositories with custom patches",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
     "test": "npm run build && npm run build:test && cd dist-test && node --test",
-    "validate": "npm test"
+    "validate": "npm test",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.yml\" \".github/**/*.yml\" \"*.md\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.yml\" \".github/**/*.yml\" \"*.md\""
   },
   "devDependencies": {
     "@types/node": "^24.7.2",
+    "prettier": "^3.8.3",
     "typescript": "^5.9.3",
     "yaml": "^2.8.1"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adampoit/patchlane.git"
   }
 }
