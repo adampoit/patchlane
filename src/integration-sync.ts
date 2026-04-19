@@ -45,6 +45,13 @@ function trim(value: string) {
   return value.trim();
 }
 
+function parsePatchRefs(value: string) {
+  return value
+    .split(/\r?\n|,/)
+    .map(trim)
+    .filter(Boolean);
+}
+
 function repoSlugFromRemoteUrl(url: string) {
   return url
     .replace(/\.git$/, "")
@@ -312,7 +319,7 @@ function main() {
     );
   }
 
-  const patchRefs = patchRefsRaw.split(/\r?\n/).map(trim).filter(Boolean);
+  const patchRefs = parsePatchRefs(patchRefsRaw);
   if (!patchRefs.length)
     fail("PATCH_REFS did not contain any patch branch names.");
 

@@ -32,7 +32,7 @@ on:
         default: sync/integration
         type: string
       patch_refs:
-        description: Newline-delimited patch branch names applied in order.
+        description: Comma- or newline-delimited patch branch names applied in order. Commas are recommended for workflow_dispatch inputs.
         required: true
         type: string
       pr_labels:
@@ -50,6 +50,16 @@ on:
         required: false
         default: false
         type: boolean
+      implementation_repository:
+        description: Repository to check out for the Patchlane implementation used at runtime.
+        required: false
+        default: adampoit/patchlane
+        type: string
+      implementation_ref:
+        description: Ref to check out for the Patchlane implementation used at runtime.
+        required: false
+        default: main
+        type: string
     secrets:
       token:
         description: "Token with `contents: write` and `pull-requests: write` permissions."
@@ -109,18 +119,9 @@ jobs:
       PR_LABELS: ${{ inputs.pr_labels }}
       PR_TITLE_TEMPLATE: ${{ inputs.pr_title }}
       DRY_RUN: ${{ inputs.dry_run }}
+      IMPLEMENTATION_REPOSITORY: ${{ inputs.implementation_repository }}
+      IMPLEMENTATION_REF: ${{ inputs.implementation_ref }}
     steps:
-      - name: Resolve kit source
-        id: source
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-        run: |
-          set -euo pipefail
-          repository="${WORKFLOW_REF%%/.github/workflows/*}"
-          ref="${WORKFLOW_REF##*@}"
-          echo "repository=$repository" >> "$GITHUB_OUTPUT"
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
-
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
@@ -130,9 +131,10 @@ jobs:
       - name: Checkout Patchlane implementation
         uses: actions/checkout@v4
         with:
-          repository: ${{ steps.source.outputs.repository }}
-          ref: ${{ steps.source.outputs.ref }}
+          repository: ${{ env.IMPLEMENTATION_REPOSITORY }}
+          ref: ${{ env.IMPLEMENTATION_REF }}
           path: .patchlane
+          sparse-checkout-cone-mode: false
           sparse-checkout: |
             package.json
             package-lock.json

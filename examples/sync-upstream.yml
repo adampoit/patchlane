@@ -21,13 +21,10 @@ on:
         required: false
         default: latest
       patch_refs:
-        description: Newline-delimited patch branch names applied in order.
+        description: Comma-separated patch branch names applied in order.
         type: string
         required: false
-        default: |
-          patch/product
-          patch/sync
-          patch/ci
+        default: patch/product, patch/sync, patch/ci
 
 permissions:
   contents: write
@@ -43,7 +40,9 @@ jobs:
       upstream_ref: ${{ inputs.upstream_ref || 'main' }}
       release_selector: ${{ inputs.release_selector || 'latest' }}
       sync_branch: sync/integration
-      patch_refs: ${{ inputs.patch_refs || format('{0}\n{1}\n{2}', 'patch/product', 'patch/sync', 'patch/ci') }}
+      patch_refs: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
+      implementation_repository: your-org/patchlane
+      implementation_ref: v1
       pr_labels: automated,upstream-sync
       pr_title: Sync integration branch from {source}
       dry_run: ${{ inputs.dry_run || false }}

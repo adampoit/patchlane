@@ -100,6 +100,8 @@ jobs:
         patch/product
         patch/sync
         patch/ci
+      implementation_repository: your-org/patchlane
+      implementation_ref: v1
       pr_labels: automated,upstream-sync
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
@@ -115,18 +117,20 @@ Trigger the workflow manually with `dry_run: true` first to verify your patches 
 
 ### Inputs
 
-| Input              | Required | Default                                 | Description                                                    |
-| ------------------ | -------- | --------------------------------------- | -------------------------------------------------------------- |
-| `upstream_owner`   | ✅       | —                                       | GitHub owner/org of the upstream repository                    |
-| `upstream_repo`    | ✅       | —                                       | Upstream repository name                                       |
-| `patch_refs`       | ✅       | —                                       | Newline-delimited list of patch branches (applied in order)    |
-| `base_branch`      | —        | `main`                                  | Fork branch that receives sync PRs                             |
-| `upstream_ref`     | —        | `main`                                  | Upstream branch when not using releases                        |
-| `release_selector` | —        | `latest`                                | `latest`, `prerelease`, regex, or blank for `upstream_ref`     |
-| `sync_branch`      | —        | `sync/integration`                      | Integration branch name                                        |
-| `pr_labels`        | —        | `upstream-sync`                         | Labels added to created PRs                                    |
-| `pr_title`         | —        | `Sync integration branch from {source}` | Template with `{base_branch}`, `{upstream}`, `{source}` tokens |
-| `dry_run`          | —        | `false`                                 | Test patches without pushing                                   |
+| Input                       | Required | Default                                 | Description                                                           |
+| --------------------------- | -------- | --------------------------------------- | --------------------------------------------------------------------- |
+| `upstream_owner`            | ✅       | —                                       | GitHub owner/org of the upstream repository                           |
+| `upstream_repo`             | ✅       | —                                       | Upstream repository name                                              |
+| `patch_refs`                | ✅       | —                                       | Comma- or newline-delimited list of patch branches (applied in order) |
+| `base_branch`               | —        | `main`                                  | Fork branch that receives sync PRs                                    |
+| `upstream_ref`              | —        | `main`                                  | Upstream branch when not using releases                               |
+| `release_selector`          | —        | `latest`                                | `latest`, `prerelease`, regex, or blank for `upstream_ref`            |
+| `sync_branch`               | —        | `sync/integration`                      | Integration branch name                                               |
+| `pr_labels`                 | —        | `upstream-sync`                         | Labels added to created PRs                                           |
+| `pr_title`                  | —        | `Sync integration branch from {source}` | Template with `{base_branch}`, `{upstream}`, `{source}` tokens        |
+| `dry_run`                   | —        | `false`                                 | Test patches without pushing                                          |
+| `implementation_repository` | —        | `adampoit/patchlane`                    | Repository checked out to run Patchlane's Node implementation         |
+| `implementation_ref`        | —        | `main`                                  | Ref checked out for Patchlane's Node implementation                   |
 
 ### Outputs
 
@@ -156,6 +160,25 @@ Trigger the workflow manually with `dry_run: true` first to verify your patches 
 2. **Order matters** – Put foundational patches first (e.g., `patch/ci` before `patch/product`)
 3. **Store workflows on patches** – Your fork's CI workflows should live on a patch branch, not the base branch
 4. **Test locally first** – Use `dry_run: true` to validate before letting automation push
+
+When you pin the reusable workflow with `@v1` or a commit SHA, pass matching `implementation_repository` and `implementation_ref` values so the runtime checkout uses the same Patchlane revision.
+
+For `workflow_dispatch` inputs, prefer comma-separated `patch_refs` values because the GitHub UI handles a single-line text input more reliably than multiline text.
+
+Both formats are supported:
+
+```yaml
+patch_refs: patch/product, patch/sync, patch/ci
+```
+
+```yaml
+patch_refs: |
+  patch/product
+  patch/sync
+  patch/ci
+```
+
+Use comma-separated values for manual dispatch inputs, and newline-separated values when a committed YAML block is easier to read.
 
 ---
 
