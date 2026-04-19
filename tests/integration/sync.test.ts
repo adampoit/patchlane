@@ -289,9 +289,15 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
     assert.equal(readOutput(run1Out, "sync_branch"), "sync/integration");
     assert.equal(readOutput(run1Out, "pr_number"), "1");
     assert.equal(
+      readOutput(run1Out, "applied_refs"),
+      "patch/product\npatch/sync\npatch/ci",
+    );
+    assert.equal(
       readPrField(stateDir, 1, "title"),
       "Sync integration branch from release v1.1.0",
     );
+    assert.equal(readPrField(stateDir, 1, "labels"), "automated,upstream-sync");
+    assert.match(readPrField(stateDir, 1, "body"), /patch\/product/);
     assert.ok(existsSync(path.join(forkWork, "PRODUCT.txt")));
     assert.ok(existsSync(path.join(forkWork, ".github/workflows/ci.yml")));
     assert.ok(
@@ -411,8 +417,244 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
 
     assert.notEqual(run4.status, 0);
     assert.equal(readOutput(run4Out, "failed_bookmark"), "patch/conflict");
+    assert.equal(readOutput(run4Out, "applied_refs"), "patch/product");
+    assert.equal(readOutput(run4Out, "conflicted_paths"), "README.md");
     assert.equal(readOutput(run4Out, "status"), "conflicted");
     assert.match(readFileSync(run4Summary, "utf8"), /README\.md/);
+  } finally {
+    rmSync(tempRoot, { force: true, recursive: true });
+  }
+});
+
+test("integration sync CLI handles release selectors and patch edge cases", () => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), "patchlane-"));
+  try {
+    const stateDir = path.join(tempRoot, "gh-state");
+    mkdirSync(stateDir, { recursive: true });
+
+    const upstreamBare = path.join(tempRoot, "upstream.git");
+    const forkBare = path.join(tempRoot, "fork.git");
+    const upstreamWork = path.join(tempRoot, "upstream-work");
+    const forkSeed = path.join(tempRoot, "fork-seed");
+    const prereleaseWork = path.join(tempRoot, "prerelease-work");
+    const regexWork = path.join(tempRoot, "regex-work");
+    const noopWork = path.join(tempRoot, "noop-work");
+    const missingWork = path.join(tempRoot, "missing-work");
+    const noMatchWork = path.join(tempRoot, "no-match-work");
+
+    git(["init", "--bare", "--initial-branch=main", upstreamBare], tempRoot);
+    git(["clone", upstreamBare, upstreamWork], tempRoot);
+    configureUser(upstreamWork);
+    writeFileSync(path.join(upstreamWork, "README.md"), "# Upstream Project\n");
+    git(["add", "README.md"], upstreamWork);
+    git(["commit", "-m", "Initial upstream release"], upstreamWork);
+    git(["push", "origin", "main"], upstreamWork);
+    git(
+      ["-c", "tag.gpgSign=false", "tag", "-a", "v1.0.0", "-m", "v1.0.0"],
+      upstreamWork,
+    );
+    git(["push", "origin", "v1.0.0"], upstreamWork);
+
+    git(["init", "--bare", "--initial-branch=main", forkBare], tempRoot);
+    git(["clone", upstreamBare, forkSeed], tempRoot);
+    configureUser(forkSeed);
+    git(["remote", "rename", "origin", "upstream"], forkSeed);
+    git(["remote", "add", "origin", forkBare], forkSeed);
+    git(["push", "origin", "main"], forkSeed);
+
+    createUpstreamRelease(
+      upstreamWork,
+      upstreamBare,
+      "v1.1.0",
+      "v1.1.0",
+      "# Upstream Project v1.1.0",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/noop",
+      "v1.0.0",
+      "README.md",
+      "# Upstream Project v1.1.0",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/regex",
+      "v1.1.0",
+      "REGEX.txt",
+      "regex patch",
+    );
+    createUpstreamRelease(
+      upstreamWork,
+      upstreamBare,
+      "v1.2.0-rc.1",
+      "v1.2.0-rc.1",
+      "# Upstream Project v1.2.0-rc.1",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/prerelease",
+      "v1.2.0-rc.1",
+      "RC.txt",
+      "prerelease patch",
+    );
+
+    writeReleasesState(stateDir, [
+      {
+        tag_name: "v1.2.0-rc.1",
+        html_url: "https://example.test/upstream/releases/tag/v1.2.0-rc.1",
+        draft: false,
+        prerelease: true,
+      },
+      {
+        tag_name: "v1.1.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.1.0",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "v1.0.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.0.0",
+        draft: false,
+        prerelease: false,
+      },
+    ]);
+    writeFileSync(path.join(stateDir, "prs.json"), "[]\n");
+
+    git(["clone", forkBare, prereleaseWork], tempRoot);
+    configureUser(prereleaseWork);
+    const prereleaseOut = path.join(tempRoot, "prerelease.out");
+    const prereleaseSummary = path.join(tempRoot, "prerelease.summary");
+    const prereleaseRun = runSync(
+      prereleaseWork,
+      stateDir,
+      prereleaseOut,
+      prereleaseSummary,
+      "patch/prerelease",
+      "main",
+      "prerelease",
+      true,
+      "Sync integration branch from {source}",
+      upstreamBare,
+    );
+
+    assert.equal(
+      prereleaseRun.status,
+      0,
+      [prereleaseRun.stderr.trim(), prereleaseRun.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(prereleaseOut, "status"), "dry_run");
+    assert.equal(readOutput(prereleaseOut, "applied_refs"), "patch/prerelease");
+    assert.ok(existsSync(path.join(prereleaseWork, "RC.txt")));
+    assert.match(
+      readFileSync(prereleaseSummary, "utf8"),
+      /release v1\.2\.0-rc\.1/,
+    );
+
+    git(["clone", forkBare, regexWork], tempRoot);
+    configureUser(regexWork);
+    const regexOut = path.join(tempRoot, "regex.out");
+    const regexSummary = path.join(tempRoot, "regex.summary");
+    const regexRun = runSync(
+      regexWork,
+      stateDir,
+      regexOut,
+      regexSummary,
+      "patch/regex",
+      "main",
+      "^v1\\.1\\.0$",
+      true,
+      "Sync integration branch from {source}",
+      upstreamBare,
+    );
+
+    assert.equal(
+      regexRun.status,
+      0,
+      [regexRun.stderr.trim(), regexRun.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(regexOut, "status"), "dry_run");
+    assert.equal(readOutput(regexOut, "applied_refs"), "patch/regex");
+    assert.ok(existsSync(path.join(regexWork, "REGEX.txt")));
+    assert.match(readFileSync(regexSummary, "utf8"), /release v1\.1\.0/);
+
+    git(["clone", forkBare, noopWork], tempRoot);
+    configureUser(noopWork);
+    const noopOut = path.join(tempRoot, "noop.out");
+    const noopSummary = path.join(tempRoot, "noop.summary");
+    const noopRun = runSync(
+      noopWork,
+      stateDir,
+      noopOut,
+      noopSummary,
+      "patch/noop",
+      "main",
+      "^v1\\.1\\.0$",
+      true,
+      "Sync integration branch from {source}",
+      upstreamBare,
+    );
+
+    assert.equal(
+      noopRun.status,
+      0,
+      [noopRun.stderr.trim(), noopRun.stdout.trim()].filter(Boolean).join("\n"),
+    );
+    assert.equal(readOutput(noopOut, "status"), "dry_run");
+    assert.equal(readOutput(noopOut, "applied_refs"), "");
+    assert.match(
+      noopRun.stdout,
+      /Skipping patch\/noop; patch produced no staged changes\./,
+    );
+
+    git(["clone", forkBare, missingWork], tempRoot);
+    configureUser(missingWork);
+    const missingOut = path.join(tempRoot, "missing.out");
+    const missingSummary = path.join(tempRoot, "missing.summary");
+    const missingRun = runSync(
+      missingWork,
+      stateDir,
+      missingOut,
+      missingSummary,
+      "patch/missing",
+      "main",
+      "^v1\\.1\\.0$",
+      true,
+      "Sync integration branch from {source}",
+      upstreamBare,
+    );
+
+    assert.notEqual(missingRun.status, 0);
+    assert.equal(readOutput(missingOut, "failed_bookmark"), "patch/missing");
+    assert.equal(readOutput(missingOut, "applied_refs"), "");
+    assert.equal(readOutput(missingOut, "status"), "missing_patch");
+    assert.match(
+      readFileSync(missingSummary, "utf8"),
+      /patch ref could not be resolved locally or from `origin`/,
+    );
+
+    git(["clone", forkBare, noMatchWork], tempRoot);
+    configureUser(noMatchWork);
+    const noMatchOut = path.join(tempRoot, "no-match.out");
+    const noMatchSummary = path.join(tempRoot, "no-match.summary");
+    const noMatchRun = runSync(
+      noMatchWork,
+      stateDir,
+      noMatchOut,
+      noMatchSummary,
+      "patch/regex",
+      "main",
+      "^v9\\.",
+      true,
+      "Sync integration branch from {source}",
+      upstreamBare,
+    );
+
+    assert.notEqual(noMatchRun.status, 0);
+    assert.match(noMatchRun.stderr, /No upstream release matched selector/);
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }
