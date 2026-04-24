@@ -2,74 +2,35 @@
 
 **Keep your fork in sync without the merge headaches.**
 
-Patchlane is a pair of reusable GitHub Actions workflows that automate the tedious work of maintaining forked repositories with custom patches. It rebuilds a generated integration branch from upstream, reapplies your patch branches, publishes that branch for CI, and then promotes the exact tested commit onto your fork branch automatically.
+Patchlane is a pair of reusable GitHub Actions workflows that automate maintaining forked repositories with custom patches. It rebuilds an integration branch from upstream, reapplies your patch branches, publishes the result for CI, and then promotes the exact tested commit onto your fork branch automatically.
 
----
+## How It Works
 
-## The Problem
-
-Maintaining a fork with custom changes is painful:
-
-- **Upstream updates break your patches** – You're constantly resolving the same conflicts
-- **No visibility into what broke** – Finding which patch failed is a manual detective hunt
-- **Merge history becomes a mess** – Traditional merge-and-resolve approaches pollute your git history
-- **No automation** – You're manually rebasing and testing patches every time upstream releases
-
-## The Solution
-
-Patchlane introduces a **patch-queue model** that treats your fork's customizations as an ordered, testable sequence:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Upstream ───────► Integration Branch ◄─────── Patches  │
-│     v2.1.0           (auto-rebuilt daily)    patch/ci   │
-│                                                patch/   │
-│                                                product  │
-└─────────────────────────────────────────────────────────┘
-```
-
-### How It Works
-
-1. **Start fresh** – Patchlane creates a disposable integration branch from upstream (branch or release tag)
-2. **Apply patches in order** – Your configured patch branches are applied sequentially
-3. **Fail fast** – If a patch conflicts, the workflow stops immediately and tells you exactly which one failed
-4. **Publish the generated branch** – Patchlane force-updates `sync_branch` with the rebuilt result and records its commit SHA
-5. **Run CI on `sync_branch`** – Your normal fork CI validates the generated branch
-6. **Promote the tested SHA** – A second reusable workflow force-with-lease updates `base_branch` only if `sync_branch` still points at the tested SHA
-
----
-
-## Key Features
-
-| Feature                          | Benefit                                                                         |
-| -------------------------------- | ------------------------------------------------------------------------------- |
-| **🔄 Automatic rebuilds**        | Schedule daily syncs or trigger manually—your candidate branch stays current    |
-| **🎯 Precise failure detection** | Know immediately which patch failed and why, with conflict details              |
-| **🏷️ Release tracking**          | Follow `latest`, `prerelease`, or match tags with regex patterns                |
-| **🧪 Dry-run mode**              | Test patch application without pushing changes                                  |
-| **📦 Clean git history**         | Fresh integration branches built from upstream without accumulating sync merges |
-| **⚡ Reusable workflows**        | Separate publish and promote stages for safer automation                        |
-
----
+1. **Rebuild** – Patchlane creates a fresh integration branch from an upstream branch or release tag.
+2. **Apply patches** – Your configured patch branches are applied sequentially.
+3. **Fail fast** – If a patch conflicts, the workflow stops and reports which patch failed and why.
+4. **Publish** – The rebuilt branch is force-pushed to `sync_branch` and its commit SHA is recorded.
+5. **Run CI** – Your fork's CI runs on `sync_branch` and validates the result.
+6. **Promote** – A second reusable workflow force-with-lease updates `base_branch` only if `sync_branch` still points at the tested SHA.
 
 ## Quick Start
 
-### 1. Create Your Patch Branches
+### Prerequisites
 
-Organize your fork-specific changes into logical patch branches:
+- A forked repository on GitHub.
+- `permissions: contents: write` in your workflow so the default `GITHUB_TOKEN` can push branches.
+
+### 1. Create Patch Branches
+
+Organize your fork-specific changes into logical patch branches and push them to your fork:
 
 ```bash
-# Fork-specific product customizations
 git checkout -b patch/product
-
-# Fork-owned workflow files
 git checkout -b patch/sync
 git checkout -b patch/ci
 ```
 
-Push these branches to your fork.
-
-### 2. Add the Publish Workflow
+### 2. Add the Sync Workflow
 
 Create `.github/workflows/sync-upstream.yml` in your fork:
 
@@ -78,20 +39,20 @@ name: Sync Upstream Integration
 
 on:
   schedule:
-    - cron: "0 10 * * *" # Daily at 10am
+    - cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Test without pushing changes"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
 
 jobs:
   sync:
-    uses: your-org/patchlane/.github/workflows/patchlane.yml@v1
+    uses: your-org/patchlane/.github/workflows/patchlane.yml@main
     with:
       upstream_owner: kubernetes
       upstream_repo: kubernetes
@@ -102,12 +63,33 @@ jobs:
         patch/sync
         patch/ci
       implementation_repository: your-org/patchlane
-      implementation_ref: v1
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      implementation_ref: main
+      dry_run: ${{ inputs.dry_run || false }}
 ```
 
-### 3. Add the Promotion Workflow
+### 3. Add a CI Workflow
+
+Create `.github/workflows/fork-ci.yml` in your fork. **It must run on `sync_branch` pushes** so the promotion workflow receives the tested `head_sha`:
+
+```yaml
+name: Fork CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - sync/integration
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Replace this with your fork's actual CI checks."
+```
+
+### 4. Add the Promotion Workflow
 
 Create `.github/workflows/promote-tested-sync.yml` in your fork:
 
@@ -127,22 +109,18 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'sync/integration'
-    uses: your-org/patchlane/.github/workflows/promote.yml@v1
+    uses: your-org/patchlane/.github/workflows/promote.yml@main
     with:
       base_branch: main
       sync_branch: sync/integration
       expected_sync_sha: ${{ github.event.workflow_run.head_sha }}
       implementation_repository: your-org/patchlane
-      implementation_ref: v1
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+      implementation_ref: main
 ```
 
-Your normal CI workflow must run on `sync/integration` so the promotion workflow receives the tested `head_sha`.
+### 5. Run It
 
-### 4. Run It
-
-Trigger the workflow manually with `dry_run: true` first to verify your patches apply cleanly.
+Trigger the sync workflow manually with `dry_run: true` first to verify your patches apply cleanly.
 
 ---
 
@@ -194,72 +172,39 @@ Trigger the workflow manually with `dry_run: true` first to verify your patches 
 
 ---
 
-## Understanding the Patch Model
+## Patch Format
 
-### Patch-Queue vs. Merge-and-Resolve
-
-**Traditional approach:** Merge upstream into your fork, resolve conflicts, commit. Over time, your history becomes a tangled web of merge commits and conflict resolutions.
-
-**Patchlane approach:** Treat your customizations as an ordered list of patches applied on top of a clean upstream base. Every sync starts fresh, publishes a generated integration branch, and promotes your fork branch only after CI succeeds on that exact generated commit.
-
-### Best Practices
-
-1. **Keep patches focused** – Each patch branch should address a single concern
-2. **Order matters** – Put foundational patches first (e.g., `patch/ci` before `patch/product`)
-3. **Store workflows on patches** – Your fork's CI workflows should live on a patch branch, not the promoted base branch
-4. **Treat the base branch as generated output** – Avoid direct commits on `base_branch`; put fork-owned changes on `patch/*`
-5. **Test locally first** – Use `dry_run: true` to validate before letting automation push
-
-When you pin the reusable workflow with `@v1` or a commit SHA, pass matching `implementation_repository` and `implementation_ref` values so the runtime checkout uses the same Patchlane revision.
-
-For `workflow_dispatch` inputs, prefer comma-separated `patch_refs` values because the GitHub UI handles a single-line text input more reliably than multiline text.
-
-Both formats are supported:
+`patch_refs` accepts comma- or newline-delimited branch names. Use commas for `workflow_dispatch` inputs (the GitHub UI handles single-line text more reliably) and newlines for committed YAML:
 
 ```yaml
+# Good for workflow_dispatch inputs
 patch_refs: patch/product, patch/sync, patch/ci
-```
 
-```yaml
+# Good for committed workflow files
 patch_refs: |
   patch/product
   patch/sync
   patch/ci
 ```
 
-Use comma-separated values for manual dispatch inputs, and newline-separated values when a committed YAML block is easier to read.
+## Best Practices
 
----
-
-## Repository Structure
-
-```
-patchlane/
-├── .github/workflows/patchlane.yml    # Reusable publish workflow
-├── .github/workflows/promote.yml      # Reusable promotion workflow
-├── src/integration-sync.ts            # Publish sync branch logic
-├── src/promote-sync.ts                # Tested-SHA promotion logic
-├── examples/
-│   ├── sync-upstream.yml              # Sample caller workflow
-│   ├── promote-tested-sync.yml        # Sample CI-gated promotion workflow
-│   └── fork-ci.yml                    # Sample fork-owned CI
-└── tests/integration/sync.test.ts     # Integration tests
-```
+- **Keep patches focused** – Each patch branch should address a single concern.
+- **Order matters** – Put foundational patches first (e.g., `patch/ci` before `patch/product`).
+- **Store workflows on patches** – Your fork's CI and sync workflows should live on patch branches, not the promoted base branch.
+- **Treat the base branch as generated output** – Avoid direct commits on `base_branch`; put fork-owned changes on `patch/*`.
+- **Test locally first** – Use `dry_run: true` to validate before letting automation push.
 
 ---
 
 ## Development
-
-### Local Testing
 
 ```bash
 npm install
 npm test
 ```
 
-This builds the TypeScript, validates YAML, and runs the integration harness with mocked git operations.
-
----
+This builds the TypeScript and runs the integration harness with mocked git operations.
 
 ## License
 

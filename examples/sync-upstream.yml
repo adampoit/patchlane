@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Skip push and promotion.
+        description: Skip push operations.
         type: boolean
         required: false
         default: true
@@ -21,7 +21,7 @@ on:
         required: false
         default: latest
       patch_refs:
-        description: Comma-separated patch branch names applied in order.
+        description: Comma-separated patch branches applied in order.
         type: string
         required: false
         default: patch/product, patch/sync, patch/ci
@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   fork-sync:
-    uses: your-org/patchlane/.github/workflows/patchlane.yml@v1
+    uses: your-org/patchlane/.github/workflows/patchlane.yml@main
     with:
       upstream_owner: upstream-org
       upstream_repo: upstream-repo
@@ -41,7 +41,5 @@ jobs:
       sync_branch: sync/integration
       patch_refs: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
       implementation_repository: your-org/patchlane
-      implementation_ref: v1
+      implementation_ref: main
       dry_run: ${{ inputs.dry_run || false }}
-    secrets:
-      token: ${{ secrets.FORK_SYNC_TOKEN }}
