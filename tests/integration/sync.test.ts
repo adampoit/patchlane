@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
 const cliPath = path.join(repoRoot, "dist", "integration-sync.js");
+const promoteCliPath = path.join(repoRoot, "dist", "promote-sync.js");
 const mockGhPath = path.join(
   repoRoot,
   "dist-test",
@@ -91,16 +92,6 @@ function readOutput(file: string, key: string) {
   return "";
 }
 
-function readPrField(stateDir: string, number: number, field: string) {
-  const prs = JSON.parse(
-    readFileSync(path.join(stateDir, "prs.json"), "utf8"),
-  ) as Array<Record<string, unknown>>;
-  const pr = prs.find((item) => item.number === number);
-  if (!pr) return "";
-  const value = pr[field];
-  return Array.isArray(value) ? value.join(",") : String(value ?? "");
-}
-
 function createLauncher(dir: string) {
   const ghPath = path.join(dir, "gh");
   writeFileSync(
@@ -143,6 +134,32 @@ function createPatchBranch(
   git(["push", "-f", "origin", branch], seed);
 }
 
+function commitToOriginBranch(
+  repo: string,
+  branch: string,
+  relativePath: string,
+  contents: string,
+  message: string,
+) {
+  git(["fetch", "origin", branch], repo);
+  git(["checkout", "-B", branch, `origin/${branch}`], repo);
+  mkdirSync(path.join(repo, path.dirname(relativePath)), { recursive: true });
+  writeFileSync(path.join(repo, relativePath), `${contents}\n`);
+  git(["add", relativePath], repo);
+  git(["commit", "-m", message], repo);
+  git(["push", "origin", branch], repo);
+}
+
+function readRemoteFile(repo: string, ref: string, relativePath: string) {
+  return git(["show", `${ref}:${relativePath}`], repo);
+}
+
+function remoteHasPath(repo: string, ref: string, relativePath: string) {
+  return (
+    run("git", ["cat-file", "-e", `${ref}:${relativePath}`], repo).status === 0
+  );
+}
+
 function runSync(
   worktree: string,
   stateDir: string,
@@ -152,7 +169,6 @@ function runSync(
   upstreamRef: string,
   releaseSelector: string,
   dryRun: boolean,
-  prTitle: string,
   upstreamRemoteUrl: string,
 ) {
   const launcherDir = mkdtempSync(path.join(tmpdir(), "patchlane-gh-"));
@@ -164,7 +180,6 @@ function runSync(
     GITHUB_OUTPUT: outputFile,
     GITHUB_STEP_SUMMARY: summaryFile,
     GH_TOKEN: "integration-token",
-    GH_REPO: "example/fork",
     UPSTREAM_OWNER: "example",
     UPSTREAM_REPO: "upstream",
     BASE_BRANCH: "main",
@@ -172,8 +187,6 @@ function runSync(
     RELEASE_SELECTOR: releaseSelector,
     SYNC_BRANCH: "sync/integration",
     PATCH_REFS: patchRefs,
-    PR_LABELS: "automated,upstream-sync",
-    PR_TITLE_TEMPLATE: prTitle,
     DRY_RUN: dryRun ? "true" : "false",
     UPSTREAM_REMOTE_URL: upstreamRemoteUrl,
   };
@@ -181,6 +194,24 @@ function runSync(
   const result = run("node", [cliPath], worktree, env);
   rmSync(launcherDir, { force: true, recursive: true });
   return result;
+}
+
+function runPromote(
+  worktree: string,
+  outputFile: string,
+  summaryFile: string,
+  expectedSha: string,
+) {
+  const env = {
+    ...process.env,
+    GITHUB_OUTPUT: outputFile,
+    GITHUB_STEP_SUMMARY: summaryFile,
+    BASE_BRANCH: "main",
+    SYNC_BRANCH: "sync/integration",
+    EXPECTED_SYNC_SHA: expectedSha,
+  };
+
+  return run("node", [promoteCliPath], worktree, env);
 }
 
 test("integration sync CLI rebuilds from releases and branch refs", () => {
@@ -276,7 +307,6 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       "main",
       "latest",
       false,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -285,24 +315,40 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       0,
       [run1.stderr.trim(), run1.stdout.trim()].filter(Boolean).join("\n"),
     );
-    assert.equal(readOutput(run1Out, "status"), "created");
+    assert.equal(readOutput(run1Out, "status"), "published");
     assert.equal(readOutput(run1Out, "sync_branch"), "sync/integration");
-    assert.equal(readOutput(run1Out, "pr_number"), "1");
+    assert.notEqual(readOutput(run1Out, "sync_sha"), "");
     assert.equal(
       readOutput(run1Out, "applied_refs"),
       "patch/product\npatch/sync\npatch/ci",
     );
-    assert.equal(
-      readPrField(stateDir, 1, "title"),
-      "Sync integration branch from release v1.1.0",
-    );
-    assert.equal(readPrField(stateDir, 1, "labels"), "automated,upstream-sync");
-    assert.match(readPrField(stateDir, 1, "body"), /patch\/product/);
     assert.ok(existsSync(path.join(forkWork, "PRODUCT.txt")));
     assert.ok(existsSync(path.join(forkWork, ".github/workflows/ci.yml")));
     assert.ok(
       existsSync(path.join(forkWork, ".github/workflows/sync-upstream.yml")),
     );
+    git(["fetch", "origin", "main", "sync/integration"], forkSeed);
+    assert.equal(
+      git(["rev-parse", "refs/remotes/origin/sync/integration"], forkSeed),
+      readOutput(run1Out, "sync_sha"),
+    );
+    assert.equal(
+      readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
+      "# Upstream Project",
+    );
+    assert.equal(
+      remoteHasPath(forkSeed, "refs/remotes/origin/main", "PRODUCT.txt"),
+      false,
+    );
+    assert.equal(
+      readRemoteFile(
+        forkSeed,
+        "refs/remotes/origin/sync/integration",
+        "PRODUCT.txt",
+      ),
+      "product patch",
+    );
+    assert.equal(readFileSync(path.join(stateDir, "prs.json"), "utf8"), "[]\n");
 
     const run2Out = path.join(tempRoot, "run-2.out");
     const run2Summary = path.join(tempRoot, "run-2.summary");
@@ -315,7 +361,6 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       "main",
       "latest",
       false,
-      "Refresh integration branch from {source}",
       upstreamBare,
     );
 
@@ -324,12 +369,14 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       0,
       [run2.stderr.trim(), run2.stdout.trim()].filter(Boolean).join("\n"),
     );
-    assert.equal(readOutput(run2Out, "status"), "updated");
-    assert.equal(readOutput(run2Out, "pr_number"), "1");
+    assert.equal(readOutput(run2Out, "status"), "published");
+    assert.notEqual(readOutput(run2Out, "sync_sha"), "");
+    git(["fetch", "origin", "main", "sync/integration"], forkSeed);
     assert.equal(
-      readPrField(stateDir, 1, "title"),
-      "Refresh integration branch from release v1.1.0",
+      readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
+      "# Upstream Project",
     );
+    assert.equal(readFileSync(path.join(stateDir, "prs.json"), "utf8"), "[]\n");
 
     writeFileSync(path.join(upstreamWork, "BRANCH.txt"), "# Branch Mode\n");
     git(["add", "BRANCH.txt"], upstreamWork);
@@ -356,7 +403,6 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       "main",
       "",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -411,7 +457,6 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       "main",
       "latest",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -533,7 +578,6 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       "main",
       "prerelease",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -565,7 +609,6 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       "main",
       "^v1\\.1\\.0$",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -594,7 +637,6 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       "main",
       "^v1\\.1\\.0$",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -623,7 +665,6 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       "main",
       "^v1\\.1\\.0$",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
@@ -649,12 +690,432 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       "main",
       "^v9\\.",
       true,
-      "Sync integration branch from {source}",
       upstreamBare,
     );
 
     assert.notEqual(noMatchRun.status, 0);
     assert.match(noMatchRun.stderr, /No upstream release matched selector/);
+  } finally {
+    rmSync(tempRoot, { force: true, recursive: true });
+  }
+});
+
+test("promote sync CLI promotes tested sync branches onto the base branch", () => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), "patchlane-"));
+  try {
+    const stateDir = path.join(tempRoot, "gh-state");
+    mkdirSync(stateDir, { recursive: true });
+
+    const upstreamBare = path.join(tempRoot, "upstream.git");
+    const forkBare = path.join(tempRoot, "fork.git");
+    const upstreamWork = path.join(tempRoot, "upstream-work");
+    const forkSeed = path.join(tempRoot, "fork-seed");
+    const firstWork = path.join(tempRoot, "first-work");
+    const secondWork = path.join(tempRoot, "second-work");
+    const promoteWork = path.join(tempRoot, "promote-work");
+
+    git(["init", "--bare", "--initial-branch=main", upstreamBare], tempRoot);
+    git(["clone", upstreamBare, upstreamWork], tempRoot);
+    configureUser(upstreamWork);
+    writeFileSync(path.join(upstreamWork, "README.md"), "# Upstream Project\n");
+    git(["add", "README.md"], upstreamWork);
+    git(["commit", "-m", "Initial upstream release"], upstreamWork);
+    git(["push", "origin", "main"], upstreamWork);
+    git(
+      ["-c", "tag.gpgSign=false", "tag", "-a", "v1.0.0", "-m", "v1.0.0"],
+      upstreamWork,
+    );
+    git(["push", "origin", "v1.0.0"], upstreamWork);
+
+    git(["init", "--bare", "--initial-branch=main", forkBare], tempRoot);
+    git(["clone", upstreamBare, forkSeed], tempRoot);
+    configureUser(forkSeed);
+    git(["remote", "rename", "origin", "upstream"], forkSeed);
+    git(["remote", "add", "origin", forkBare], forkSeed);
+    git(["push", "origin", "main"], forkSeed);
+
+    createUpstreamRelease(
+      upstreamWork,
+      upstreamBare,
+      "v1.1.0",
+      "v1.1.0",
+      "# Upstream Project v1.1.0",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/product",
+      "v1.1.0",
+      "PRODUCT.txt",
+      "product patch",
+    );
+    writeReleasesState(stateDir, [
+      {
+        tag_name: "v1.1.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.1.0",
+        draft: false,
+        prerelease: false,
+      },
+    ]);
+    writeFileSync(path.join(stateDir, "prs.json"), "[]\n");
+
+    git(["clone", forkBare, firstWork], tempRoot);
+    configureUser(firstWork);
+    const firstOut = path.join(tempRoot, "first.out");
+    const firstSummary = path.join(tempRoot, "first.summary");
+    const firstRun = runSync(
+      firstWork,
+      stateDir,
+      firstOut,
+      firstSummary,
+      "patch/product",
+      "main",
+      "latest",
+      false,
+      upstreamBare,
+    );
+
+    assert.equal(
+      firstRun.status,
+      0,
+      [firstRun.stderr.trim(), firstRun.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(firstOut, "status"), "published");
+    const firstSha = readOutput(firstOut, "sync_sha");
+
+    git(["clone", forkBare, promoteWork], tempRoot);
+    configureUser(promoteWork);
+    const promote1Out = path.join(tempRoot, "promote-1.out");
+    const promote1Summary = path.join(tempRoot, "promote-1.summary");
+    const promote1 = runPromote(
+      promoteWork,
+      promote1Out,
+      promote1Summary,
+      firstSha,
+    );
+
+    assert.equal(
+      promote1.status,
+      0,
+      [promote1.stderr.trim(), promote1.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(promote1Out, "status"), "promoted");
+    assert.equal(readOutput(promote1Out, "promoted_sha"), firstSha);
+    git(["fetch", "origin", "main", "sync/integration"], forkSeed);
+    assert.equal(
+      readRemoteFile(forkSeed, "refs/remotes/origin/main", "PRODUCT.txt"),
+      "product patch",
+    );
+
+    createUpstreamRelease(
+      upstreamWork,
+      upstreamBare,
+      "v1.2.0",
+      "v1.2.0",
+      "# Upstream Project v1.2.0",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/product",
+      "v1.2.0",
+      "PRODUCT.txt",
+      "product patch",
+    );
+    writeReleasesState(stateDir, [
+      {
+        tag_name: "v1.2.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.2.0",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "v1.1.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.1.0",
+        draft: false,
+        prerelease: false,
+      },
+    ]);
+
+    git(["clone", forkBare, secondWork], tempRoot);
+    configureUser(secondWork);
+    const secondOut = path.join(tempRoot, "second.out");
+    const secondSummary = path.join(tempRoot, "second.summary");
+    const secondRun = runSync(
+      secondWork,
+      stateDir,
+      secondOut,
+      secondSummary,
+      "patch/product",
+      "main",
+      "latest",
+      false,
+      upstreamBare,
+    );
+
+    assert.equal(
+      secondRun.status,
+      0,
+      [secondRun.stderr.trim(), secondRun.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(secondOut, "status"), "published");
+    const secondSha = readOutput(secondOut, "sync_sha");
+
+    const promote2Out = path.join(tempRoot, "promote-2.out");
+    const promote2Summary = path.join(tempRoot, "promote-2.summary");
+    const promote2 = runPromote(
+      promoteWork,
+      promote2Out,
+      promote2Summary,
+      secondSha,
+    );
+
+    assert.equal(
+      promote2.status,
+      0,
+      [promote2.stderr.trim(), promote2.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(promote2Out, "status"), "promoted");
+    assert.equal(readOutput(promote2Out, "promoted_sha"), secondSha);
+    git(["fetch", "origin", "main", "sync/integration"], forkSeed);
+    assert.equal(
+      readRemoteFile(forkSeed, "refs/remotes/origin/main", "PRODUCT.txt"),
+      "product patch",
+    );
+    assert.equal(
+      readRemoteFile(
+        forkSeed,
+        "refs/remotes/origin/sync/integration",
+        "PRODUCT.txt",
+      ),
+      "product patch",
+    );
+    assert.match(readFileSync(secondSummary, "utf8"), /release v1\.2\.0/);
+  } finally {
+    rmSync(tempRoot, { force: true, recursive: true });
+  }
+});
+
+test("promote sync CLI rejects stale tested SHAs and only promotes the current sync head", () => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), "patchlane-"));
+  try {
+    const stateDir = path.join(tempRoot, "gh-state");
+    mkdirSync(stateDir, { recursive: true });
+
+    const upstreamBare = path.join(tempRoot, "upstream.git");
+    const forkBare = path.join(tempRoot, "fork.git");
+    const upstreamWork = path.join(tempRoot, "upstream-work");
+    const forkSeed = path.join(tempRoot, "fork-seed");
+    const firstWork = path.join(tempRoot, "first-work");
+    const secondWork = path.join(tempRoot, "second-work");
+    const promoteWork = path.join(tempRoot, "promote-work");
+
+    git(["init", "--bare", "--initial-branch=main", upstreamBare], tempRoot);
+    git(["clone", upstreamBare, upstreamWork], tempRoot);
+    configureUser(upstreamWork);
+    writeFileSync(path.join(upstreamWork, "README.md"), "# Upstream Project\n");
+    git(["add", "README.md"], upstreamWork);
+    git(["commit", "-m", "Initial upstream release"], upstreamWork);
+    git(["push", "origin", "main"], upstreamWork);
+    git(
+      ["-c", "tag.gpgSign=false", "tag", "-a", "v1.0.0", "-m", "v1.0.0"],
+      upstreamWork,
+    );
+    git(["push", "origin", "v1.0.0"], upstreamWork);
+
+    git(["init", "--bare", "--initial-branch=main", forkBare], tempRoot);
+    git(["clone", upstreamBare, forkSeed], tempRoot);
+    configureUser(forkSeed);
+    git(["remote", "rename", "origin", "upstream"], forkSeed);
+    git(["remote", "add", "origin", forkBare], forkSeed);
+    git(["push", "origin", "main"], forkSeed);
+
+    createUpstreamRelease(
+      upstreamWork,
+      upstreamBare,
+      "v1.1.0",
+      "v1.1.0",
+      "# Upstream Project v1.1.0",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/product",
+      "v1.1.0",
+      "README.md",
+      "# Fork Release v1.1.0",
+    );
+    writeReleasesState(stateDir, [
+      {
+        tag_name: "v1.1.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.1.0",
+        draft: false,
+        prerelease: false,
+      },
+    ]);
+    writeFileSync(path.join(stateDir, "prs.json"), "[]\n");
+
+    git(["clone", forkBare, firstWork], tempRoot);
+    configureUser(firstWork);
+    const firstOut = path.join(tempRoot, "first.out");
+    const firstSummary = path.join(tempRoot, "first.summary");
+    const firstRun = runSync(
+      firstWork,
+      stateDir,
+      firstOut,
+      firstSummary,
+      "patch/product",
+      "main",
+      "latest",
+      false,
+      upstreamBare,
+    );
+
+    assert.equal(
+      firstRun.status,
+      0,
+      [firstRun.stderr.trim(), firstRun.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    const firstSha = readOutput(firstOut, "sync_sha");
+
+    git(["clone", forkBare, promoteWork], tempRoot);
+    configureUser(promoteWork);
+    const promote1Out = path.join(tempRoot, "promote-1.out");
+    const promote1Summary = path.join(tempRoot, "promote-1.summary");
+    const promote1 = runPromote(
+      promoteWork,
+      promote1Out,
+      promote1Summary,
+      firstSha,
+    );
+
+    assert.equal(
+      promote1.status,
+      0,
+      [promote1.stderr.trim(), promote1.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    commitToOriginBranch(
+      forkSeed,
+      "main",
+      "README.md",
+      "# Base Branch Override",
+      "Customize base branch",
+    );
+
+    createUpstreamRelease(
+      upstreamWork,
+      upstreamBare,
+      "v1.2.0",
+      "v1.2.0",
+      "# Upstream Project v1.2.0",
+    );
+    createPatchBranch(
+      forkSeed,
+      "patch/product",
+      "v1.2.0",
+      "README.md",
+      "# Fork Release v1.2.0",
+    );
+    writeReleasesState(stateDir, [
+      {
+        tag_name: "v1.2.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.2.0",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "v1.1.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.1.0",
+        draft: false,
+        prerelease: false,
+      },
+    ]);
+
+    git(["clone", forkBare, secondWork], tempRoot);
+    configureUser(secondWork);
+    const secondOut = path.join(tempRoot, "second.out");
+    const secondSummary = path.join(tempRoot, "second.summary");
+    const secondRun = runSync(
+      secondWork,
+      stateDir,
+      secondOut,
+      secondSummary,
+      "patch/product",
+      "main",
+      "latest",
+      false,
+      upstreamBare,
+    );
+
+    assert.equal(
+      secondRun.status,
+      0,
+      [secondRun.stderr.trim(), secondRun.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(secondOut, "status"), "published");
+    const secondSha = readOutput(secondOut, "sync_sha");
+
+    const staleOut = path.join(tempRoot, "promote-stale.out");
+    const staleSummary = path.join(tempRoot, "promote-stale.summary");
+    const stalePromote = runPromote(
+      promoteWork,
+      staleOut,
+      staleSummary,
+      firstSha,
+    );
+
+    assert.notEqual(stalePromote.status, 0);
+    assert.equal(readOutput(staleOut, "status"), "stale_sync");
+    assert.equal(readOutput(staleOut, "promoted_sha"), "");
+    git(["fetch", "origin", "main", "sync/integration"], forkSeed);
+    assert.equal(
+      readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
+      "# Base Branch Override",
+    );
+
+    const promote2Out = path.join(tempRoot, "promote-2.out");
+    const promote2Summary = path.join(tempRoot, "promote-2.summary");
+    const promote2 = runPromote(
+      promoteWork,
+      promote2Out,
+      promote2Summary,
+      secondSha,
+    );
+
+    assert.equal(
+      promote2.status,
+      0,
+      [promote2.stderr.trim(), promote2.stdout.trim()]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    assert.equal(readOutput(promote2Out, "status"), "promoted");
+    assert.equal(readOutput(promote2Out, "promoted_sha"), secondSha);
+    git(["fetch", "origin", "main", "sync/integration"], forkSeed);
+    assert.equal(
+      readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
+      "# Fork Release v1.2.0",
+    );
+    assert.equal(
+      readRemoteFile(
+        forkSeed,
+        "refs/remotes/origin/sync/integration",
+        "README.md",
+      ),
+      "# Fork Release v1.2.0",
+    );
+    assert.match(readFileSync(staleSummary, "utf8"), /Expected tested SHA/);
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }

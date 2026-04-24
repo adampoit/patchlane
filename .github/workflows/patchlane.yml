@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       base_branch:
-        description: Fork branch that receives the integration PR.
+        description: Fork branch promoted to the rebuilt integration result.
         required: false
         default: main
         type: string
@@ -27,7 +27,7 @@ on:
         default: latest
         type: string
       sync_branch:
-        description: Branch rebuilt from upstream and patch branches.
+        description: Published generated branch rebuilt from upstream and patch branches.
         required: false
         default: sync/integration
         type: string
@@ -35,18 +35,8 @@ on:
         description: Comma- or newline-delimited patch branch names applied in order. Commas are recommended for workflow_dispatch inputs.
         required: true
         type: string
-      pr_labels:
-        description: Comma-separated labels added when the PR is created.
-        required: false
-        default: upstream-sync
-        type: string
-      pr_title:
-        description: PR title template. Supports `{base_branch}`, `{upstream}`, and `{source}` tokens.
-        required: false
-        default: Sync integration branch from {source}
-        type: string
       dry_run:
-        description: Skip push and PR operations while still exercising patch application locally.
+        description: Skip push and promotion while still exercising patch application locally.
         required: false
         default: false
         type: boolean
@@ -62,18 +52,15 @@ on:
         type: string
     secrets:
       token:
-        description: "Token with `contents: write` and `pull-requests: write` permissions."
+        description: "Token with `contents: write` permissions."
         required: false
     outputs:
       sync_branch:
-        description: Sync branch used for the PR when assembly succeeds.
+        description: Published generated branch when assembly succeeds.
         value: ${{ jobs.sync.outputs.sync_branch }}
-      pr_number:
-        description: Pull request number when a PR is created or updated.
-        value: ${{ jobs.sync.outputs.pr_number }}
-      pr_url:
-        description: Pull request URL when a PR is created or updated.
-        value: ${{ jobs.sync.outputs.pr_url }}
+      sync_sha:
+        description: Commit SHA published to the generated sync branch.
+        value: ${{ jobs.sync.outputs.sync_sha }}
       failed_bookmark:
         description: First patch branch that failed to apply.
         value: ${{ jobs.sync.outputs.failed_bookmark }}
@@ -92,7 +79,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   sync:
@@ -100,8 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sync_branch: ${{ steps.sync.outputs.sync_branch }}
-      pr_number: ${{ steps.sync.outputs.pr_number }}
-      pr_url: ${{ steps.sync.outputs.pr_url }}
+      sync_sha: ${{ steps.sync.outputs.sync_sha }}
       failed_bookmark: ${{ steps.sync.outputs.failed_bookmark }}
       failed_commit: ${{ steps.sync.outputs.failed_commit }}
       conflicted_paths: ${{ steps.sync.outputs.conflicted_paths }}
@@ -116,8 +101,6 @@ jobs:
       RELEASE_SELECTOR: ${{ inputs.release_selector }}
       SYNC_BRANCH: ${{ inputs.sync_branch }}
       PATCH_REFS: ${{ inputs.patch_refs }}
-      PR_LABELS: ${{ inputs.pr_labels }}
-      PR_TITLE_TEMPLATE: ${{ inputs.pr_title }}
       DRY_RUN: ${{ inputs.dry_run }}
       IMPLEMENTATION_REPOSITORY: ${{ inputs.implementation_repository }}
       IMPLEMENTATION_REF: ${{ inputs.implementation_ref }}

@@ -1,0 +1,24 @@
+name: Promote Tested Sync Branch
+
+on:
+  workflow_run:
+    workflows: ["Fork CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'sync/integration'
+    uses: your-org/patchlane/.github/workflows/promote.yml@v1
+    with:
+      base_branch: main
+      sync_branch: sync/integration
+      expected_sync_sha: ${{ github.event.workflow_run.head_sha }}
+      implementation_repository: your-org/patchlane
+      implementation_ref: v1
+    secrets:
+      token: ${{ secrets.FORK_SYNC_TOKEN }}

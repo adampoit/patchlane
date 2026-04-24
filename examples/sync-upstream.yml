@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Skip push and PR operations.
+        description: Skip push and promotion.
         type: boolean
         required: false
         default: true
@@ -28,7 +28,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   fork-sync:
@@ -43,8 +42,6 @@ jobs:
       patch_refs: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
       implementation_repository: your-org/patchlane
       implementation_ref: v1
-      pr_labels: automated,upstream-sync
-      pr_title: Sync integration branch from {source}
       dry_run: ${{ inputs.dry_run || false }}
     secrets:
       token: ${{ secrets.FORK_SYNC_TOKEN }}
