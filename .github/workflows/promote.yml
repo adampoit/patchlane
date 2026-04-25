@@ -27,10 +27,6 @@ on:
         required: false
         default: main
         type: string
-    secrets:
-      token:
-        description: "Token with `contents: write` permissions."
-        required: false
     outputs:
       promoted_sha:
         description: Commit SHA promoted onto the base branch.
@@ -60,7 +56,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.token || github.token }}
+          token: ${{ github.token }}
 
       - name: Checkout Patchlane implementation
         uses: actions/checkout@v4
