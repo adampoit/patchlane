@@ -1,7 +1,7 @@
 {
   "name": "patchlane",
   "version": "0.1.0",
-  "description": "Reusable GitHub Actions workflow for maintaining forked repositories with custom patches",
+  "description": "CLI tool for maintaining forked repositories with custom patches",
   "type": "module",
   "bin": {
     "patchlane": "./dist/cli.js"

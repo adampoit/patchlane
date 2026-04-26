@@ -13,8 +13,20 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'sync/integration'
-    uses: your-org/patchlane/.github/workflows/promote.yml@main
-    with:
-      base_branch: main
-      sync_branch: sync/integration
-      expected_sync_sha: ${{ github.event.workflow_run.head_sha }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run patchlane promote
+        run: npx patchlane@latest promote
+        env:
+          BASE_BRANCH: main
+          SYNC_BRANCH: sync/integration
+          EXPECTED_SYNC_SHA: ${{ github.event.workflow_run.head_sha }}

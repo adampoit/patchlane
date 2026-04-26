@@ -31,13 +31,25 @@ permissions:
 
 jobs:
   fork-sync:
-    uses: your-org/patchlane/.github/workflows/patchlane.yml@main
-    with:
-      upstream_owner: upstream-org
-      upstream_repo: upstream-repo
-      base_branch: main
-      upstream_ref: ${{ inputs.upstream_ref || 'main' }}
-      release_selector: ${{ inputs.release_selector || 'latest' }}
-      sync_branch: sync/integration
-      patch_refs: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
-      dry_run: ${{ inputs.dry_run || false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run patchlane sync
+        run: npx patchlane@latest sync
+        env:
+          UPSTREAM_OWNER: upstream-org
+          UPSTREAM_REPO: upstream-repo
+          BASE_BRANCH: main
+          UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+          RELEASE_SELECTOR: ${{ inputs.release_selector || 'latest' }}
+          SYNC_BRANCH: sync/integration
+          PATCH_REFS: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
+          DRY_RUN: ${{ inputs.dry_run || false }}

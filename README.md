@@ -2,7 +2,7 @@
 
 **Keep your fork in sync without the merge headaches.**
 
-Patchlane is a set of reusable GitHub Actions workflows and an npm CLI that automate maintaining forked repositories with custom patches. It rebuilds an integration branch from upstream, reapplies your patch branches, publishes the result for CI, and then promotes the exact tested commit onto your fork branch automatically.
+Patchlane is an npm CLI that automates maintaining forked repositories with custom patches. It rebuilds an integration branch from upstream, reapplies your patch branches, publishes the result for CI, and then promotes the exact tested commit onto your fork branch automatically.
 
 Install it from npm and run it locally or inside your own workflows:
 
@@ -17,7 +17,7 @@ npx patchlane sync --upstream-owner=kubernetes --upstream-repo=kubernetes --patc
 3. **Fail fast** – If a patch conflicts, the workflow stops and reports which patch failed and why.
 4. **Publish** – The rebuilt branch is force-pushed to `sync_branch` and its commit SHA is recorded.
 5. **Run CI** – Your fork's CI runs on `sync_branch` and validates the result.
-6. **Promote** – A second reusable workflow force-with-lease updates `base_branch` only if `sync_branch` still points at the tested SHA.
+6. **Promote** – A second step force-with-lease updates `base_branch` only if `sync_branch` still points at the tested SHA.
 
 ## Quick Start
 
@@ -58,17 +58,28 @@ permissions:
 
 jobs:
   sync:
-    uses: your-org/patchlane/.github/workflows/patchlane.yml@main
-    with:
-      upstream_owner: kubernetes
-      upstream_repo: kubernetes
-      base_branch: main
-      sync_branch: sync/integration
-      patch_refs: |
-        patch/product
-        patch/sync
-        patch/ci
-      dry_run: ${{ inputs.dry_run || false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run patchlane sync
+        run: npx patchlane@latest sync
+        env:
+          UPSTREAM_OWNER: kubernetes
+          UPSTREAM_REPO: kubernetes
+          BASE_BRANCH: main
+          SYNC_BRANCH: sync/integration
+          PATCH_REFS: |
+            patch/product
+            patch/sync
+            patch/ci
+          DRY_RUN: ${{ inputs.dry_run || false }}
 ```
 
 ### 3. Add a CI Workflow
@@ -113,11 +124,22 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_branch == 'sync/integration'
-    uses: your-org/patchlane/.github/workflows/promote.yml@main
-    with:
-      base_branch: main
-      sync_branch: sync/integration
-      expected_sync_sha: ${{ github.event.workflow_run.head_sha }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run patchlane promote
+        run: npx patchlane@latest promote
+        env:
+          BASE_BRANCH: main
+          SYNC_BRANCH: sync/integration
+          EXPECTED_SYNC_SHA: ${{ github.event.workflow_run.head_sha }}
 ```
 
 ### 5. Run It
@@ -147,28 +169,31 @@ npx patchlane promote \
   --sync-branch=sync/integration
 ```
 
-Every CLI flag also falls back to an environment variable of the same name (e.g. `--upstream-owner` → `UPSTREAM_OWNER`). This means existing reusable workflows and local scripts continue to work without changes.
+Every CLI flag also falls back to an environment variable of the same name (e.g. `--upstream-owner` → `UPSTREAM_OWNER`).
 
 ---
 
 ## Configuration Reference
 
-### Publish Workflow Inputs
+### Sync Options
 
-| Input                       | Required | Default              | Description                                                           |
-| --------------------------- | -------- | -------------------- | --------------------------------------------------------------------- |
-| `upstream_owner`            | ✅       | —                    | GitHub owner/org of the upstream repository                           |
-| `upstream_repo`             | ✅       | —                    | Upstream repository name                                              |
-| `patch_refs`                | ✅       | —                    | Comma- or newline-delimited list of patch branches (applied in order) |
-| `base_branch`               | —        | `main`               | Fork branch later promoted by the promotion workflow                  |
-| `upstream_ref`              | —        | `main`               | Upstream branch when not using releases                               |
-| `release_selector`          | —        | `latest`             | `latest`, `prerelease`, regex, or blank for `upstream_ref`            |
-| `sync_branch`               | —        | `sync/integration`   | Published generated branch name                                       |
-| `dry_run`                   | —        | `false`              | Test patches without pushing                                          |
-| `implementation_repository` | —        | `adampoit/patchlane` | **Deprecated.** Patchlane is now installed from npm at runtime.       |
-| `implementation_ref`        | —        | `main`               | **Deprecated.** Patchlane is now installed from npm at runtime.       |
+| Option / Env Var       | Required | Default            | Description                                                           |
+| ---------------------- | -------- | ------------------ | --------------------------------------------------------------------- |
+| `upstream_owner`       | ✅       | —                  | GitHub owner/org of the upstream repository                           |
+| `upstream_repo`        | ✅       | —                  | Upstream repository name                                              |
+| `patch_refs`           | ✅       | —                  | Comma- or newline-delimited list of patch branches (applied in order) |
+| `base_branch`          | —        | `main`             | Fork branch later promoted by the promotion workflow                  |
+| `upstream_ref`         | —        | `main`             | Upstream branch when not using releases                               |
+| `release_selector`     | —        | `latest`           | `latest`, `prerelease`, regex, or blank for `upstream_ref`            |
+| `sync_branch`          | —        | `sync/integration` | Published generated branch name                                       |
+| `dry_run`              | —        | `false`            | Test patches without pushing                                          |
+| `origin_remote_name`   | —        | `origin`           | Name of the fork remote                                               |
+| `upstream_remote_name` | —        | `upstream`         | Name of the upstream remote                                           |
+| `upstream_remote_url`  | —        | inferred           | URL of the upstream remote (inferred from owner/repo if omitted)      |
 
-### Publish Workflow Outputs
+### Sync Outputs
+
+When running in a GitHub Actions environment, Patchlane writes the following outputs to `GITHUB_OUTPUT`:
 
 | Output             | Description                                              |
 | ------------------ | -------------------------------------------------------- |
@@ -180,17 +205,16 @@ Every CLI flag also falls back to an environment variable of the same name (e.g.
 | `applied_refs`     | Successfully applied patches                             |
 | `status`           | `dry_run`, `published`, `missing_patch`, or `conflicted` |
 
-### Promotion Workflow Inputs
+### Promote Options
 
-| Input                       | Required | Default              | Description                                                         |
-| --------------------------- | -------- | -------------------- | ------------------------------------------------------------------- |
-| `base_branch`               | —        | `main`               | Fork branch promoted to the tested sync commit                      |
-| `sync_branch`               | —        | `sync/integration`   | Generated branch that already passed CI                             |
-| `expected_sync_sha`         | ✅       | —                    | Tested commit SHA that must still be the current `sync_branch` head |
-| `implementation_repository` | —        | `adampoit/patchlane` | **Deprecated.** Patchlane is now installed from npm at runtime.     |
-| `implementation_ref`        | —        | `main`               | **Deprecated.** Patchlane is now installed from npm at runtime.     |
+| Option / Env Var     | Required | Default            | Description                                                         |
+| -------------------- | -------- | ------------------ | ------------------------------------------------------------------- |
+| `expected_sync_sha`  | ✅       | —                  | Tested commit SHA that must still be the current `sync_branch` head |
+| `base_branch`        | —        | `main`             | Fork branch promoted to the tested sync commit                      |
+| `sync_branch`        | —        | `sync/integration` | Generated branch that already passed CI                             |
+| `origin_remote_name` | —        | `origin`           | Name of the fork remote                                             |
 
-### Promotion Workflow Outputs
+### Promote Outputs
 
 | Output         | Description                                     |
 | -------------- | ----------------------------------------------- |

@@ -63,6 +63,25 @@ function writeSummary(title: string, body: string) {
   appendFileSync(file, `${title}\n\n${body}\n`);
 }
 
+function configureGitIdentity() {
+  const name = git(["config", "user.name"], {
+    allowFailure: true,
+  }).stdout.trim();
+  const email = git(["config", "user.email"], {
+    allowFailure: true,
+  }).stdout.trim();
+  if (!name) {
+    git(["config", "user.name", "github-actions[bot]"]);
+  }
+  if (!email) {
+    git([
+      "config",
+      "user.email",
+      "41898282+github-actions[bot]@users.noreply.github.com",
+    ]);
+  }
+}
+
 export type PromoteSyncOptions = {
   baseBranch?: string;
   syncBranch?: string;
@@ -71,6 +90,8 @@ export type PromoteSyncOptions = {
 };
 
 export function runPromoteSync(options: PromoteSyncOptions) {
+  configureGitIdentity();
+
   const baseBranch = options.baseBranch ?? "main";
   const syncBranch = options.syncBranch ?? "sync/integration";
   const expectedSyncSha = options.expectedSyncSha;

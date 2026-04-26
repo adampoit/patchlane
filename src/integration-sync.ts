@@ -221,6 +221,25 @@ function tmpFile(name: string) {
   return path.join(mkdtempSync(path.join(tmpdir(), `${name}-`)), "payload");
 }
 
+function configureGitIdentity() {
+  const name = git(["config", "user.name"], {
+    allowFailure: true,
+  }).stdout.trim();
+  const email = git(["config", "user.email"], {
+    allowFailure: true,
+  }).stdout.trim();
+  if (!name) {
+    git(["config", "user.name", "github-actions[bot]"]);
+  }
+  if (!email) {
+    git([
+      "config",
+      "user.email",
+      "41898282+github-actions[bot]@users.noreply.github.com",
+    ]);
+  }
+}
+
 export type IntegrationSyncOptions = {
   upstreamOwner: string;
   upstreamRepo: string;
@@ -236,6 +255,8 @@ export type IntegrationSyncOptions = {
 };
 
 export function runIntegrationSync(options: IntegrationSyncOptions) {
+  configureGitIdentity();
+
   const upstreamOwner = options.upstreamOwner;
   const upstreamRepo = options.upstreamRepo;
   const patchRefsRaw = options.patchRefs;
