@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 type RunOptions = {
   cwd?: string;
@@ -220,22 +221,35 @@ function tmpFile(name: string) {
   return path.join(mkdtempSync(path.join(tmpdir(), `${name}-`)), "payload");
 }
 
-function main() {
-  const upstreamOwner = requireEnv("UPSTREAM_OWNER");
-  const upstreamRepo = requireEnv("UPSTREAM_REPO");
-  const patchRefsRaw = requireEnv("PATCH_REFS");
+export type IntegrationSyncOptions = {
+  upstreamOwner: string;
+  upstreamRepo: string;
+  patchRefs: string;
+  baseBranch?: string;
+  upstreamRef?: string;
+  releaseSelector?: string;
+  syncBranch?: string;
+  dryRun?: boolean;
+  originRemoteName?: string;
+  upstreamRemoteName?: string;
+  upstreamRemoteUrl?: string;
+};
 
-  const baseBranch = getEnv("BASE_BRANCH", "main");
-  const upstreamRef = getEnv("UPSTREAM_REF", baseBranch);
-  const releaseSelector = getEnv("RELEASE_SELECTOR");
-  const syncBranch = getEnv("SYNC_BRANCH", "sync/integration");
-  const dryRun = isTrue(getEnv("DRY_RUN", "false"));
-  const originRemoteName = getEnv("ORIGIN_REMOTE_NAME", "origin");
-  const upstreamRemoteName = getEnv("UPSTREAM_REMOTE_NAME", "upstream");
-  const upstreamRemoteUrl = getEnv(
-    "UPSTREAM_REMOTE_URL",
-    `https://github.com/${upstreamOwner}/${upstreamRepo}.git`,
-  );
+export function runIntegrationSync(options: IntegrationSyncOptions) {
+  const upstreamOwner = options.upstreamOwner;
+  const upstreamRepo = options.upstreamRepo;
+  const patchRefsRaw = options.patchRefs;
+
+  const baseBranch = options.baseBranch ?? "main";
+  const upstreamRef = options.upstreamRef ?? baseBranch;
+  const releaseSelector = options.releaseSelector ?? "";
+  const syncBranch = options.syncBranch ?? "sync/integration";
+  const dryRun = options.dryRun ?? false;
+  const originRemoteName = options.originRemoteName ?? "origin";
+  const upstreamRemoteName = options.upstreamRemoteName ?? "upstream";
+  const upstreamRemoteUrl =
+    options.upstreamRemoteUrl ??
+    `https://github.com/${upstreamOwner}/${upstreamRepo}.git`;
 
   const existingUpstream = git(["remote", "get-url", upstreamRemoteName], {
     allowFailure: true,
@@ -435,4 +449,22 @@ function main() {
   log("Integration sync completed with status 'published'");
 }
 
-main();
+function main() {
+  runIntegrationSync({
+    upstreamOwner: requireEnv("UPSTREAM_OWNER"),
+    upstreamRepo: requireEnv("UPSTREAM_REPO"),
+    patchRefs: requireEnv("PATCH_REFS"),
+    baseBranch: getEnv("BASE_BRANCH", "main"),
+    upstreamRef: getEnv("UPSTREAM_REF"),
+    releaseSelector: getEnv("RELEASE_SELECTOR"),
+    syncBranch: getEnv("SYNC_BRANCH", "sync/integration"),
+    dryRun: isTrue(getEnv("DRY_RUN", "false")),
+    originRemoteName: getEnv("ORIGIN_REMOTE_NAME", "origin"),
+    upstreamRemoteName: getEnv("UPSTREAM_REMOTE_NAME", "upstream"),
+    upstreamRemoteUrl: getEnv("UPSTREAM_REMOTE_URL"),
+  });
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

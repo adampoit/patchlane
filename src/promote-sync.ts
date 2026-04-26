@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 type RunOptions = {
   allowFailure?: boolean;
@@ -62,11 +63,18 @@ function writeSummary(title: string, body: string) {
   appendFileSync(file, `${title}\n\n${body}\n`);
 }
 
-function main() {
-  const baseBranch = getEnv("BASE_BRANCH", "main");
-  const syncBranch = getEnv("SYNC_BRANCH", "sync/integration");
-  const expectedSyncSha = requireEnv("EXPECTED_SYNC_SHA");
-  const originRemoteName = getEnv("ORIGIN_REMOTE_NAME", "origin");
+export type PromoteSyncOptions = {
+  baseBranch?: string;
+  syncBranch?: string;
+  expectedSyncSha: string;
+  originRemoteName?: string;
+};
+
+export function runPromoteSync(options: PromoteSyncOptions) {
+  const baseBranch = options.baseBranch ?? "main";
+  const syncBranch = options.syncBranch ?? "sync/integration";
+  const expectedSyncSha = options.expectedSyncSha;
+  const originRemoteName = options.originRemoteName ?? "origin";
 
   git([
     "fetch",
@@ -147,4 +155,15 @@ function main() {
   log("Integration promotion completed with status 'promoted'");
 }
 
-main();
+function main() {
+  runPromoteSync({
+    baseBranch: getEnv("BASE_BRANCH", "main"),
+    syncBranch: getEnv("SYNC_BRANCH", "sync/integration"),
+    expectedSyncSha: requireEnv("EXPECTED_SYNC_SHA"),
+    originRemoteName: getEnv("ORIGIN_REMOTE_NAME", "origin"),
+  });
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}

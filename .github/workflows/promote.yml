@@ -18,12 +18,12 @@ on:
         required: true
         type: string
       implementation_repository:
-        description: Repository to check out for the Patchlane implementation used at runtime.
+        description: "Deprecated. Patchlane is now installed from npm at runtime."
         required: false
         default: adampoit/patchlane
         type: string
       implementation_ref:
-        description: Ref to check out for the Patchlane implementation used at runtime.
+        description: "Deprecated. Patchlane is now installed from npm at runtime."
         required: false
         default: main
         type: string
@@ -53,8 +53,6 @@ jobs:
       BASE_BRANCH: ${{ inputs.base_branch }}
       SYNC_BRANCH: ${{ inputs.sync_branch }}
       EXPECTED_SYNC_SHA: ${{ inputs.expected_sync_sha }}
-      IMPLEMENTATION_REPOSITORY: ${{ inputs.implementation_repository }}
-      IMPLEMENTATION_REF: ${{ inputs.implementation_ref }}
     steps:
       - name: Checkout fork
         uses: actions/checkout@v4
@@ -62,31 +60,10 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.token || github.token }}
 
-      - name: Checkout Patchlane implementation
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.IMPLEMENTATION_REPOSITORY }}
-          ref: ${{ env.IMPLEMENTATION_REF }}
-          path: .patchlane
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            package.json
-            package-lock.json
-            tsconfig.json
-            src
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Install Patchlane dependencies
-        run: npm ci
-        working-directory: ./.patchlane
-
-      - name: Build Patchlane
-        run: npm run build
-        working-directory: ./.patchlane
 
       - name: Configure git identity
         run: |
@@ -95,4 +72,4 @@ jobs:
 
       - name: Promote tested sync branch
         id: promote
-        run: node ./.patchlane/dist/promote-sync.js
+        run: npx patchlane@latest promote

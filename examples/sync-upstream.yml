@@ -40,6 +40,4 @@ jobs:
       release_selector: ${{ inputs.release_selector || 'latest' }}
       sync_branch: sync/integration
       patch_refs: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
-      implementation_repository: your-org/patchlane
-      implementation_ref: main
       dry_run: ${{ inputs.dry_run || false }}

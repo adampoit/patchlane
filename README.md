@@ -2,7 +2,13 @@
 
 **Keep your fork in sync without the merge headaches.**
 
-Patchlane is a pair of reusable GitHub Actions workflows that automate maintaining forked repositories with custom patches. It rebuilds an integration branch from upstream, reapplies your patch branches, publishes the result for CI, and then promotes the exact tested commit onto your fork branch automatically.
+Patchlane is a set of reusable GitHub Actions workflows and an npm CLI that automate maintaining forked repositories with custom patches. It rebuilds an integration branch from upstream, reapplies your patch branches, publishes the result for CI, and then promotes the exact tested commit onto your fork branch automatically.
+
+Install it from npm and run it locally or inside your own workflows:
+
+```bash
+npx patchlane sync --upstream-owner=kubernetes --upstream-repo=kubernetes --patch-refs="patch/product,patch/sync"
+```
 
 ## How It Works
 
@@ -62,8 +68,6 @@ jobs:
         patch/product
         patch/sync
         patch/ci
-      implementation_repository: your-org/patchlane
-      implementation_ref: main
       dry_run: ${{ inputs.dry_run || false }}
 ```
 
@@ -114,13 +118,36 @@ jobs:
       base_branch: main
       sync_branch: sync/integration
       expected_sync_sha: ${{ github.event.workflow_run.head_sha }}
-      implementation_repository: your-org/patchlane
-      implementation_ref: main
 ```
 
 ### 5. Run It
 
 Trigger the sync workflow manually with `dry_run: true` first to verify your patches apply cleanly.
+
+---
+
+## CLI Usage
+
+You can run Patchlane directly via `npx` without cloning the repository:
+
+```bash
+# Sync (rebuild integration branch)
+npx patchlane sync \
+  --upstream-owner=kubernetes \
+  --upstream-repo=kubernetes \
+  --patch-refs="patch/product,patch/sync,patch/ci" \
+  --base-branch=main \
+  --sync-branch=sync/integration \
+  --dry-run
+
+# Promote (after CI passes)
+npx patchlane promote \
+  --expected-sync-sha=abc123 \
+  --base-branch=main \
+  --sync-branch=sync/integration
+```
+
+Every CLI flag also falls back to an environment variable of the same name (e.g. `--upstream-owner` → `UPSTREAM_OWNER`). This means existing reusable workflows and local scripts continue to work without changes.
 
 ---
 
@@ -138,8 +165,8 @@ Trigger the sync workflow manually with `dry_run: true` first to verify your pat
 | `release_selector`          | —        | `latest`             | `latest`, `prerelease`, regex, or blank for `upstream_ref`            |
 | `sync_branch`               | —        | `sync/integration`   | Published generated branch name                                       |
 | `dry_run`                   | —        | `false`              | Test patches without pushing                                          |
-| `implementation_repository` | —        | `adampoit/patchlane` | Repository checked out to run Patchlane's Node implementation         |
-| `implementation_ref`        | —        | `main`               | Ref checked out for Patchlane's Node implementation                   |
+| `implementation_repository` | —        | `adampoit/patchlane` | **Deprecated.** Patchlane is now installed from npm at runtime.       |
+| `implementation_ref`        | —        | `main`               | **Deprecated.** Patchlane is now installed from npm at runtime.       |
 
 ### Publish Workflow Outputs
 
@@ -160,8 +187,8 @@ Trigger the sync workflow manually with `dry_run: true` first to verify your pat
 | `base_branch`               | —        | `main`               | Fork branch promoted to the tested sync commit                      |
 | `sync_branch`               | —        | `sync/integration`   | Generated branch that already passed CI                             |
 | `expected_sync_sha`         | ✅       | —                    | Tested commit SHA that must still be the current `sync_branch` head |
-| `implementation_repository` | —        | `adampoit/patchlane` | Repository checked out to run Patchlane's Node implementation       |
-| `implementation_ref`        | —        | `main`               | Ref checked out for Patchlane's Node implementation                 |
+| `implementation_repository` | —        | `adampoit/patchlane` | **Deprecated.** Patchlane is now installed from npm at runtime.     |
+| `implementation_ref`        | —        | `main`               | **Deprecated.** Patchlane is now installed from npm at runtime.     |
 
 ### Promotion Workflow Outputs
 
@@ -205,6 +232,10 @@ npm test
 ```
 
 This builds the TypeScript and runs the integration harness with mocked git operations.
+
+### Publishing
+
+Patchlane is published to npm automatically when a GitHub Release is created. Make sure the `NPM_TOKEN` repository secret is configured with a valid npm access token.
 
 ## License
 

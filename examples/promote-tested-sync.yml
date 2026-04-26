@@ -18,5 +18,3 @@ jobs:
       base_branch: main
       sync_branch: sync/integration
       expected_sync_sha: ${{ github.event.workflow_run.head_sha }}
-      implementation_repository: your-org/patchlane
-      implementation_ref: main
