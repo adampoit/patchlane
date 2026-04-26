@@ -369,14 +369,22 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       0,
       [run2.stderr.trim(), run2.stdout.trim()].filter(Boolean).join("\n"),
     );
-    assert.equal(readOutput(run2Out, "status"), "published");
+    assert.equal(readOutput(run2Out, "status"), "unchanged");
     assert.notEqual(readOutput(run2Out, "sync_sha"), "");
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
+    assert.equal(
+      readOutput(run2Out, "sync_sha"),
+      readOutput(run1Out, "sync_sha"),
+    );
     assert.equal(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
       "# Upstream Project",
     );
     assert.equal(readFileSync(path.join(stateDir, "prs.json"), "utf8"), "[]\n");
+    assert.match(
+      run2.stdout,
+      /Skipping push for sync\/integration; rebuilt tree matches origin\/sync\/integration\./,
+    );
 
     writeFileSync(path.join(upstreamWork, "BRANCH.txt"), "# Branch Mode\n");
     git(["add", "BRANCH.txt"], upstreamWork);

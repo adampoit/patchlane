@@ -287,6 +287,15 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
     originRemoteName,
     `+refs/heads/${baseBranch}:refs/remotes/${originRemoteName}/${baseBranch}`,
   ]);
+  git(
+    [
+      "fetch",
+      "--no-tags",
+      originRemoteName,
+      `+refs/heads/${syncBranch}:refs/remotes/${originRemoteName}/${syncBranch}`,
+    ],
+    { allowFailure: true },
+  );
   git([
     "fetch",
     "--no-tags",
@@ -424,9 +433,11 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
   writeOutput("conflicted_paths", "");
   writeOutput("applied_refs", appliedRefs.join("\n"));
   writeOutput("sync_branch", syncBranch);
-  writeOutput("sync_sha", git(["rev-parse", "HEAD"]).stdout.trim());
+  const rebuiltSyncSha = git(["rev-parse", "HEAD"]).stdout.trim();
+  const remoteSyncRef = `refs/remotes/${originRemoteName}/${syncBranch}`;
 
   if (dryRun) {
+    writeOutput("sync_sha", rebuiltSyncSha);
     writeOutput("status", "dry_run");
     writeSummary(
       "## Integration rebuild completed",
@@ -445,6 +456,44 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
     return;
   }
 
+  const remoteSyncExists =
+    git(["rev-parse", "--verify", "--quiet", remoteSyncRef], {
+      allowFailure: true,
+    }).status === 0;
+  if (remoteSyncExists) {
+    const rebuiltTree = git([
+      "rev-parse",
+      `${rebuiltSyncSha}^{tree}`,
+    ]).stdout.trim();
+    const remoteSyncSha = git(["rev-parse", remoteSyncRef]).stdout.trim();
+    const remoteSyncTree = git([
+      "rev-parse",
+      `${remoteSyncRef}^{tree}`,
+    ]).stdout.trim();
+    if (rebuiltTree === remoteSyncTree) {
+      writeOutput("sync_sha", remoteSyncSha);
+      writeOutput("status", "unchanged");
+      writeSummary(
+        "## Integration rebuild unchanged",
+        [
+          `- Base: \`${upstreamBase}\``,
+          `- Source: \`${sourceLabel}\``,
+          `- Output branch: \`${syncBranch}\``,
+          `- Promotion target: \`${baseBranch}\``,
+          `- Published SHA: \`${remoteSyncSha}\``,
+          "- Reason: rebuilt branch tree matches the current published sync branch.",
+        ].join("\n"),
+        appliedRefs.length
+          ? `### Applied patches\n\n${bulletList(appliedRefs)}`
+          : "",
+      );
+      log(
+        `Skipping push for ${syncBranch}; rebuilt tree matches ${originRemoteName}/${syncBranch}.`,
+      );
+      return;
+    }
+  }
+
   log(`Pushing ${syncBranch} to ${originRemoteName}`);
   git([
     "push",
@@ -454,6 +503,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
     syncBranch,
   ]);
 
+  writeOutput("sync_sha", rebuiltSyncSha);
   writeOutput("status", "published");
   writeSummary(
     "## Integration rebuild published",

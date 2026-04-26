@@ -195,15 +195,15 @@ Every CLI flag also falls back to an environment variable of the same name (e.g.
 
 When running in a GitHub Actions environment, Patchlane writes the following outputs to `GITHUB_OUTPUT`:
 
-| Output             | Description                                              |
-| ------------------ | -------------------------------------------------------- |
-| `sync_branch`      | The generated branch that was built                      |
-| `sync_sha`         | The commit SHA published to `sync_branch`                |
-| `failed_bookmark`  | First patch that failed to apply                         |
-| `failed_commit`    | Commit at the head of the failed patch                   |
-| `conflicted_paths` | Files with conflicts                                     |
-| `applied_refs`     | Successfully applied patches                             |
-| `status`           | `dry_run`, `published`, `missing_patch`, or `conflicted` |
+| Output             | Description                                                           |
+| ------------------ | --------------------------------------------------------------------- |
+| `sync_branch`      | The generated branch that was built                                   |
+| `sync_sha`         | The commit SHA published to `sync_branch`                             |
+| `failed_bookmark`  | First patch that failed to apply                                      |
+| `failed_commit`    | Commit at the head of the failed patch                                |
+| `conflicted_paths` | Files with conflicts                                                  |
+| `applied_refs`     | Successfully applied patches                                          |
+| `status`           | `dry_run`, `published`, `unchanged`, `missing_patch`, or `conflicted` |
 
 ### Promote Options
 
