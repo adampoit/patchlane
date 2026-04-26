@@ -257,10 +257,6 @@ npm test
 
 This builds the TypeScript and runs the integration harness with mocked git operations.
 
-### Publishing
-
-Patchlane is published to npm automatically when a GitHub Release is created. Make sure the `NPM_TOKEN` repository secret is configured with a valid npm access token.
-
 ## License
 
 MIT
