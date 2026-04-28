@@ -1,6 +1,6 @@
 {
   "name": "patchlane",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "CLI tool for maintaining forked repositories with custom patches",
   "type": "module",
   "bin": {
