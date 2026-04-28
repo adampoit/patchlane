@@ -40,9 +40,7 @@ cli
   .option("--sync-branch <branch>", "Published generated branch name", {
     default: env("SYNC_BRANCH", "sync/integration"),
   })
-  .option("--dry-run", "Test patches without pushing", {
-    default: env("DRY_RUN") === "true",
-  })
+  .option("--dry-run", "Test patches without pushing")
   .option("--origin-remote-name <name>", "Name of the origin remote", {
     default: env("ORIGIN_REMOTE_NAME", "origin"),
   })
@@ -77,7 +75,7 @@ cli
       upstreamRef: args.upstreamRef,
       releaseSelector: args.releaseSelector,
       syncBranch: args.syncBranch,
-      dryRun: args.dryRun,
+      dryRun: args.dryRun === true || env("DRY_RUN") === "true",
       originRemoteName: args.originRemoteName,
       upstreamRemoteName: args.upstreamRemoteName,
       upstreamRemoteUrl: args.upstreamRemoteUrl,
