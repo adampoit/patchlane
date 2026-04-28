@@ -1128,3 +1128,131 @@ test("promote sync CLI rejects stale tested SHAs and only promotes the current s
     rmSync(tempRoot, { force: true, recursive: true });
   }
 });
+
+test("integration sync CLI applies patches based on older releases when releases diverge", () => {
+  const tempRoot = mkdtempSync(path.join(tmpdir(), "patchlane-"));
+  try {
+    const stateDir = path.join(tempRoot, "gh-state");
+    mkdirSync(stateDir, { recursive: true });
+
+    const upstreamBare = path.join(tempRoot, "upstream.git");
+    const forkBare = path.join(tempRoot, "fork.git");
+    const upstreamWork = path.join(tempRoot, "upstream-work");
+    const forkSeed = path.join(tempRoot, "fork-seed");
+    const syncWork = path.join(tempRoot, "sync-work");
+
+    git(["init", "--bare", "--initial-branch=main", upstreamBare], tempRoot);
+    git(["clone", upstreamBare, upstreamWork], tempRoot);
+    configureUser(upstreamWork);
+    writeFileSync(path.join(upstreamWork, "README.md"), "# Upstream Project\n");
+    git(["add", "README.md"], upstreamWork);
+    git(["commit", "-m", "Initial upstream release"], upstreamWork);
+    git(["push", "origin", "main"], upstreamWork);
+    git(
+      ["-c", "tag.gpgSign=false", "tag", "-a", "v1.0.0", "-m", "v1.0.0"],
+      upstreamWork,
+    );
+    git(["push", "origin", "v1.0.0"], upstreamWork);
+
+    git(["init", "--bare", "--initial-branch=main", forkBare], tempRoot);
+    git(["clone", upstreamBare, forkSeed], tempRoot);
+    configureUser(forkSeed);
+    git(["remote", "rename", "origin", "upstream"], forkSeed);
+    git(["remote", "add", "origin", forkBare], forkSeed);
+    git(["push", "origin", "main"], forkSeed);
+
+    // Create a release branch for v1.1.0 with a version bump
+    git(["checkout", "-b", "release/v1.1.0", "main"], upstreamWork);
+    writeFileSync(
+      path.join(upstreamWork, "version.txt"),
+      "version=1.1.0\n",
+    );
+    git(["add", "version.txt"], upstreamWork);
+    git(["commit", "-m", "Release v1.1.0"], upstreamWork);
+    git(["push", "origin", "release/v1.1.0"], upstreamWork);
+    git(
+      ["-c", "tag.gpgSign=false", "tag", "-a", "v1.1.0", "-m", "v1.1.0"],
+      upstreamWork,
+    );
+    git(["push", "origin", "v1.1.0"], upstreamWork);
+
+    // Create a divergent release branch for v1.2.0 with a different version bump
+    git(["checkout", "-b", "release/v1.2.0", "main"], upstreamWork);
+    writeFileSync(
+      path.join(upstreamWork, "version.txt"),
+      "version=1.2.0\n",
+    );
+    git(["add", "version.txt"], upstreamWork);
+    git(["commit", "-m", "Release v1.2.0"], upstreamWork);
+    git(["push", "origin", "release/v1.2.0"], upstreamWork);
+    git(
+      ["-c", "tag.gpgSign=false", "tag", "-a", "v1.2.0", "-m", "v1.2.0"],
+      upstreamWork,
+    );
+    git(["push", "origin", "v1.2.0"], upstreamWork);
+
+    // Create a patch based on v1.1.0 that adds a feature
+    createPatchBranch(
+      forkSeed,
+      "patch/feature",
+      "v1.1.0",
+      "FEATURE.txt",
+      "feature patch",
+    );
+
+    writeReleasesState(stateDir, [
+      {
+        tag_name: "v1.2.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.2.0",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "v1.1.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.1.0",
+        draft: false,
+        prerelease: false,
+      },
+      {
+        tag_name: "v1.0.0",
+        html_url: "https://example.test/upstream/releases/tag/v1.0.0",
+        draft: false,
+        prerelease: false,
+      },
+    ]);
+    writeFileSync(path.join(stateDir, "prs.json"), "[]\n");
+
+    git(["clone", forkBare, syncWork], tempRoot);
+    configureUser(syncWork);
+    const syncOut = path.join(tempRoot, "sync.out");
+    const syncSummary = path.join(tempRoot, "sync.summary");
+    const syncRun = runSync(
+      syncWork,
+      stateDir,
+      syncOut,
+      syncSummary,
+      "patch/feature",
+      "main",
+      "latest",
+      true,
+      upstreamBare,
+    );
+
+    assert.equal(
+      syncRun.status,
+      0,
+      [syncRun.stderr.trim(), syncRun.stdout.trim()].filter(Boolean).join("\n"),
+    );
+    assert.equal(readOutput(syncOut, "status"), "dry_run");
+    assert.equal(readOutput(syncOut, "applied_refs"), "patch/feature");
+    assert.ok(existsSync(path.join(syncWork, "FEATURE.txt")));
+    // version.txt should have v1.2.0, not v1.1.0 (the patch base logic avoids
+    // re-applying the v1.1.0 release changes on top of v1.2.0)
+    assert.equal(
+      readFileSync(path.join(syncWork, "version.txt"), "utf8").trim(),
+      "version=1.2.0",
+    );
+  } finally {
+    rmSync(tempRoot, { force: true, recursive: true });
+  }
+});

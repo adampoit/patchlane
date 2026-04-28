@@ -376,10 +376,50 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
       "rev-parse",
       `${resolved}^{commit}`,
     ]).stdout.trim();
+
+    const isAncestor =
+      git(["merge-base", "--is-ancestor", upstreamBase, resolved], {
+        allowFailure: true,
+      }).status === 0;
+
+    let diffBase = upstreamBase;
+
+    if (!isAncestor) {
+      const mergeBase = git(["merge-base", upstreamBase, resolved])
+        .stdout.trim();
+      const uniqueCommits = git([
+        "rev-list",
+        "--ancestry-path",
+        `${mergeBase}..${resolved}`,
+      ]).stdout.trim();
+
+      if (uniqueCommits) {
+        const commits = uniqueCommits.split("\n").filter(Boolean);
+        const oldestUnique = commits[commits.length - 1]!;
+        const tags = git(["tag", "--points-at", oldestUnique], {
+          allowFailure: true,
+        }).stdout.trim();
+
+        if (tags) {
+          // oldestUnique is tagged (likely a release the patch was based on)
+          diffBase = oldestUnique;
+        } else {
+          const parent = git(["rev-parse", `${oldestUnique}^`], {
+            allowFailure: true,
+          }).stdout.trim();
+          if (parent) diffBase = parent;
+        }
+
+        log(
+          `Patch ${ref} is not based on ${sourceLabel}; using ${diffBase.slice(0, 7)} as patch base`,
+        );
+      }
+    }
+
     const diff = runBuffer("git", [
       "diff",
       "--binary",
-      `${upstreamBase}...${resolved}`,
+      `${diffBase}...${resolved}`,
     ]);
     if (!diff.stdout.length) {
       log(`Skipping ${ref}; no net diff against ${sourceLabel}.`);
