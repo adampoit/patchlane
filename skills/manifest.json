@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "name": "patchlane-fork-setup",
+      "files": [
+        "SKILL.md",
+        "assets/sync-upstream.yml",
+        "assets/fork-ci.yml",
+        "assets/promote-tested-sync.yml"
+      ]
+    },
+    {
+      "name": "patchlane-sync-patches",
+      "files": ["SKILL.md"]
+    }
+  ]
+}

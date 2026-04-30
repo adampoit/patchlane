@@ -385,8 +385,11 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
     let diffBase = upstreamBase;
 
     if (!isAncestor) {
-      const mergeBase = git(["merge-base", upstreamBase, resolved])
-        .stdout.trim();
+      const mergeBase = git([
+        "merge-base",
+        upstreamBase,
+        resolved,
+      ]).stdout.trim();
       const uniqueCommits = git([
         "rev-list",
         "--ancestry-path",

@@ -13,12 +13,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "build:test": "tsc -p tsconfig.test.json",
-    "test": "npm run build && npm run build:test && cd dist-test && node --test",
-    "validate": "npm test",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.yml\" \".github/**/*.yml\" \"*.md\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"examples/**/*.yml\" \".github/**/*.yml\" \"*.md\"",
+    "build": "node --experimental-strip-types ./scripts/sync-skill-assets.ts && tsc -p tsconfig.json",
+    "test": "npm run build && tsc -p tsconfig.test.json && cd dist-test && node --test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

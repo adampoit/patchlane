@@ -1163,10 +1163,7 @@ test("integration sync CLI applies patches based on older releases when releases
 
     // Create a release branch for v1.1.0 with a version bump
     git(["checkout", "-b", "release/v1.1.0", "main"], upstreamWork);
-    writeFileSync(
-      path.join(upstreamWork, "version.txt"),
-      "version=1.1.0\n",
-    );
+    writeFileSync(path.join(upstreamWork, "version.txt"), "version=1.1.0\n");
     git(["add", "version.txt"], upstreamWork);
     git(["commit", "-m", "Release v1.1.0"], upstreamWork);
     git(["push", "origin", "release/v1.1.0"], upstreamWork);
@@ -1178,10 +1175,7 @@ test("integration sync CLI applies patches based on older releases when releases
 
     // Create a divergent release branch for v1.2.0 with a different version bump
     git(["checkout", "-b", "release/v1.2.0", "main"], upstreamWork);
-    writeFileSync(
-      path.join(upstreamWork, "version.txt"),
-      "version=1.2.0\n",
-    );
+    writeFileSync(path.join(upstreamWork, "version.txt"), "version=1.2.0\n");
     git(["add", "version.txt"], upstreamWork);
     git(["commit", "-m", "Release v1.2.0"], upstreamWork);
     git(["push", "origin", "release/v1.2.0"], upstreamWork);

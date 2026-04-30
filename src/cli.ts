@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import cac from "cac";
+import { installPatchlaneAgents } from "./agents-install.js";
 import { runIntegrationSync } from "./integration-sync.js";
 import { runPromoteSync } from "./promote-sync.js";
 
@@ -8,6 +9,25 @@ const cli = cac("patchlane");
 function env(name: string, fallback?: string) {
   return process.env[name] || fallback;
 }
+
+cli
+  .command("agents", "Install or update Patchlane agent skills")
+  .option("--dir <path>", "Destination directory for installed skills", {
+    default: env("PATCHLANE_AGENTS_DIR", ".agents/skills"),
+  })
+  .option("--ref <git-ref>", "Patchlane git ref to pull skills from", {
+    default: env("PATCHLANE_SKILLS_REF", "main"),
+  })
+  .action((args) => {
+    void installPatchlaneAgents({
+      installDir: args.dir,
+      ref: args.ref,
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`${message}\n`);
+      process.exit(1);
+    });
+  });
 
 cli
   .command("sync", "Rebuild integration branch from upstream and patches")
@@ -112,4 +132,5 @@ cli
   });
 
 cli.help();
-cli.parse();
+cli.parse(process.argv, { run: false });
+await Promise.resolve(cli.runMatchedCommand());

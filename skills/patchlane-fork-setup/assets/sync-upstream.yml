@@ -1,0 +1,55 @@
+name: Sync Upstream Integration
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Skip push operations.
+        type: boolean
+        required: false
+        default: true
+      upstream_ref:
+        description: Upstream branch ref to rebuild from when release_selector is blank.
+        type: string
+        required: false
+        default: main
+      release_selector:
+        description: Use `latest`, `prerelease`, or a regex for upstream tags. Leave blank to use upstream_ref.
+        type: string
+        required: false
+        default: latest
+      patch_refs:
+        description: Comma-separated patch branches applied in order.
+        type: string
+        required: false
+        default: patch/product, patch/sync, patch/ci
+
+permissions:
+  contents: write
+
+jobs:
+  fork-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run patchlane sync
+        run: npx patchlane@latest sync
+        env:
+          UPSTREAM_OWNER: upstream-org
+          UPSTREAM_REPO: upstream-repo
+          BASE_BRANCH: main
+          UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+          RELEASE_SELECTOR: ${{ inputs.release_selector || 'latest' }}
+          SYNC_BRANCH: sync/integration
+          PATCH_REFS: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
+          DRY_RUN: ${{ inputs.dry_run || false }}

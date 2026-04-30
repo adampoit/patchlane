@@ -10,6 +10,12 @@ Install it from npm and run it locally or inside your own workflows:
 npx patchlane sync --upstream-owner=kubernetes --upstream-repo=kubernetes --patch-refs="patch/product,patch/sync"
 ```
 
+If you want AI coding agents to help maintain a Patchlane fork, install the repo-managed skills into the standard `.agents/skills` folder:
+
+```bash
+npx patchlane agents
+```
+
 ## How It Works
 
 1. **Rebuild** – Patchlane creates a fresh integration branch from an upstream branch or release tag.
@@ -153,6 +159,9 @@ Trigger the sync workflow manually with `dry_run: true` first to verify your pat
 You can run Patchlane directly via `npx` without cloning the repository:
 
 ```bash
+# Install or update Patchlane-managed agent skills
+npx patchlane agents
+
 # Sync (rebuild integration branch)
 npx patchlane sync \
   --upstream-owner=kubernetes \
@@ -170,6 +179,15 @@ npx patchlane promote \
 ```
 
 Every CLI flag also falls back to an environment variable of the same name (e.g. `--upstream-owner` → `UPSTREAM_OWNER`).
+
+### Agent Skill Installer
+
+`patchlane agents` downloads the latest Patchlane-maintained skills from GitHub and installs them into `.agents/skills` in the current repository. Re-running it updates the managed Patchlane skill folders in place while leaving unrelated custom skills alone.
+
+Options:
+
+- `--dir` sets the destination folder. Default: `.agents/skills`
+- `--ref` pulls skills from a specific Patchlane git ref. Default: `main`
 
 ---
 
