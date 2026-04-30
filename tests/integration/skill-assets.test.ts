@@ -1,9 +1,8 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
+const repoRoot = path.resolve(import.meta.dirname, "..", "..");
 
 const fileMappings = [
   [
@@ -19,10 +18,8 @@ const fileMappings = [
 
 test("bundled Patchlane skill assets stay in sync with examples", () => {
   for (const [sourceRelativePath, destinationRelativePath] of fileMappings) {
-    assert.equal(
+    expect(
       readFileSync(path.join(repoRoot, destinationRelativePath), "utf8"),
-      readFileSync(path.join(repoRoot, sourceRelativePath), "utf8"),
-      `${destinationRelativePath} drifted from ${sourceRelativePath}`,
-    );
+    ).toBe(readFileSync(path.join(repoRoot, sourceRelativePath), "utf8"));
   }
 });

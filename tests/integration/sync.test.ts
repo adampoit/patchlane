@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import {
   chmodSync,
   existsSync,
@@ -12,24 +11,28 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
 
-const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
+const repoRoot = path.resolve(import.meta.dirname, "..", "..");
 const cliPath = path.join(repoRoot, "dist", "integration-sync.js");
 const promoteCliPath = path.join(repoRoot, "dist", "promote-sync.js");
-const mockGhPath = path.join(
-  repoRoot,
-  "dist-test",
-  "tests",
-  "support",
-  "mock-gh.js",
-);
+const mockGhPath = path.join(repoRoot, "tests", "support", "mock-gh.ts");
 
 type RunResult = {
   status: number;
   stdout: string;
   stderr: string;
 };
+
+function expectSuccess(result: RunResult) {
+  if (result.status !== 0) {
+    throw new Error(
+      [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n") ||
+        `Expected exit status 0, got ${result.status}`,
+    );
+  }
+
+  expect(result.status).toBe(0);
+}
 
 function run(
   command: string,
@@ -49,7 +52,7 @@ function run(
 function git(args: string[], cwd: string, env?: NodeJS.ProcessEnv) {
   const result = run("git", args, cwd, env);
   if (result.status !== 0) {
-    assert.fail(
+    throw new Error(
       [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n") ||
         `git failed: ${args.join(" ")}`,
     );
@@ -96,7 +99,7 @@ function createLauncher(dir: string) {
   const ghPath = path.join(dir, "gh");
   writeFileSync(
     ghPath,
-    `#!/usr/bin/env node\nimport { main } from ${JSON.stringify(pathToFileURL(mockGhPath).href)}\nmain(process.argv.slice(2))\n`,
+    `#!/bin/sh\nexec node --experimental-strip-types ${JSON.stringify(mockGhPath)} "$@"\n`,
   );
   chmodSync(ghPath, 0o755);
 }
@@ -310,45 +313,38 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       upstreamBare,
     );
 
-    assert.equal(
-      run1.status,
-      0,
-      [run1.stderr.trim(), run1.stdout.trim()].filter(Boolean).join("\n"),
-    );
-    assert.equal(readOutput(run1Out, "status"), "published");
-    assert.equal(readOutput(run1Out, "sync_branch"), "sync/integration");
-    assert.notEqual(readOutput(run1Out, "sync_sha"), "");
-    assert.equal(
-      readOutput(run1Out, "applied_refs"),
+    expectSuccess(run1);
+    expect(readOutput(run1Out, "status")).toBe("published");
+    expect(readOutput(run1Out, "sync_branch")).toBe("sync/integration");
+    expect(readOutput(run1Out, "sync_sha")).not.toBe("");
+    expect(readOutput(run1Out, "applied_refs")).toBe(
       "patch/product\npatch/sync\npatch/ci",
     );
-    assert.ok(existsSync(path.join(forkWork, "PRODUCT.txt")));
-    assert.ok(existsSync(path.join(forkWork, ".github/workflows/ci.yml")));
-    assert.ok(
+    expect(existsSync(path.join(forkWork, "PRODUCT.txt"))).toBe(true);
+    expect(existsSync(path.join(forkWork, ".github/workflows/ci.yml"))).toBe(
+      true,
+    );
+    expect(
       existsSync(path.join(forkWork, ".github/workflows/sync-upstream.yml")),
-    );
+    ).toBe(true);
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
-    assert.equal(
+    expect(
       git(["rev-parse", "refs/remotes/origin/sync/integration"], forkSeed),
-      readOutput(run1Out, "sync_sha"),
-    );
-    assert.equal(
+    ).toBe(readOutput(run1Out, "sync_sha"));
+    expect(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
-      "# Upstream Project",
-    );
-    assert.equal(
+    ).toBe("# Upstream Project");
+    expect(
       remoteHasPath(forkSeed, "refs/remotes/origin/main", "PRODUCT.txt"),
-      false,
-    );
-    assert.equal(
+    ).toBe(false);
+    expect(
       readRemoteFile(
         forkSeed,
         "refs/remotes/origin/sync/integration",
         "PRODUCT.txt",
       ),
-      "product patch",
-    );
-    assert.equal(readFileSync(path.join(stateDir, "prs.json"), "utf8"), "[]\n");
+    ).toBe("product patch");
+    expect(readFileSync(path.join(stateDir, "prs.json"), "utf8")).toBe("[]\n");
 
     const run2Out = path.join(tempRoot, "run-2.out");
     const run2Summary = path.join(tempRoot, "run-2.summary");
@@ -364,26 +360,19 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       upstreamBare,
     );
 
-    assert.equal(
-      run2.status,
-      0,
-      [run2.stderr.trim(), run2.stdout.trim()].filter(Boolean).join("\n"),
-    );
-    assert.equal(readOutput(run2Out, "status"), "unchanged");
-    assert.notEqual(readOutput(run2Out, "sync_sha"), "");
+    expectSuccess(run2);
+    expect(readOutput(run2Out, "status")).toBe("unchanged");
+    expect(readOutput(run2Out, "sync_sha")).not.toBe("");
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
-    assert.equal(
-      readOutput(run2Out, "sync_sha"),
+    expect(readOutput(run2Out, "sync_sha")).toBe(
       readOutput(run1Out, "sync_sha"),
     );
-    assert.equal(
+    expect(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
-      "# Upstream Project",
-    );
-    assert.equal(readFileSync(path.join(stateDir, "prs.json"), "utf8"), "[]\n");
-    assert.match(
-      run2.stdout,
-      /Skipping push for sync\/integration; rebuilt tree matches origin\/sync\/integration\./,
+    ).toBe("# Upstream Project");
+    expect(readFileSync(path.join(stateDir, "prs.json"), "utf8")).toBe("[]\n");
+    expect(run2.stdout).toContain(
+      "Skipping push for sync/integration; rebuilt tree matches origin/sync/integration.",
     );
 
     writeFileSync(path.join(upstreamWork, "BRANCH.txt"), "# Branch Mode\n");
@@ -414,14 +403,10 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       upstreamBare,
     );
 
-    assert.equal(
-      run3.status,
-      0,
-      [run3.stderr.trim(), run3.stdout.trim()].filter(Boolean).join("\n"),
-    );
-    assert.equal(readOutput(run3Out, "status"), "dry_run");
-    assert.ok(existsSync(path.join(branchWork, "BRANCH.txt")));
-    assert.ok(existsSync(path.join(branchWork, "BRANCH-PATCH.txt")));
+    expectSuccess(run3);
+    expect(readOutput(run3Out, "status")).toBe("dry_run");
+    expect(existsSync(path.join(branchWork, "BRANCH.txt"))).toBe(true);
+    expect(existsSync(path.join(branchWork, "BRANCH-PATCH.txt"))).toBe(true);
 
     createUpstreamRelease(
       upstreamWork,
@@ -468,12 +453,12 @@ test("integration sync CLI rebuilds from releases and branch refs", () => {
       upstreamBare,
     );
 
-    assert.notEqual(run4.status, 0);
-    assert.equal(readOutput(run4Out, "failed_bookmark"), "patch/conflict");
-    assert.equal(readOutput(run4Out, "applied_refs"), "patch/product");
-    assert.equal(readOutput(run4Out, "conflicted_paths"), "README.md");
-    assert.equal(readOutput(run4Out, "status"), "conflicted");
-    assert.match(readFileSync(run4Summary, "utf8"), /README\.md/);
+    expect(run4.status).not.toBe(0);
+    expect(readOutput(run4Out, "failed_bookmark")).toBe("patch/conflict");
+    expect(readOutput(run4Out, "applied_refs")).toBe("patch/product");
+    expect(readOutput(run4Out, "conflicted_paths")).toBe("README.md");
+    expect(readOutput(run4Out, "status")).toBe("conflicted");
+    expect(readFileSync(run4Summary, "utf8")).toContain("README.md");
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }
@@ -589,19 +574,12 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       upstreamBare,
     );
 
-    assert.equal(
-      prereleaseRun.status,
-      0,
-      [prereleaseRun.stderr.trim(), prereleaseRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(prereleaseOut, "status"), "dry_run");
-    assert.equal(readOutput(prereleaseOut, "applied_refs"), "patch/prerelease");
-    assert.ok(existsSync(path.join(prereleaseWork, "RC.txt")));
-    assert.match(
-      readFileSync(prereleaseSummary, "utf8"),
-      /release v1\.2\.0-rc\.1/,
+    expectSuccess(prereleaseRun);
+    expect(readOutput(prereleaseOut, "status")).toBe("dry_run");
+    expect(readOutput(prereleaseOut, "applied_refs")).toBe("patch/prerelease");
+    expect(existsSync(path.join(prereleaseWork, "RC.txt"))).toBe(true);
+    expect(readFileSync(prereleaseSummary, "utf8")).toContain(
+      "release v1.2.0-rc.1",
     );
 
     git(["clone", forkBare, regexWork], tempRoot);
@@ -620,17 +598,11 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       upstreamBare,
     );
 
-    assert.equal(
-      regexRun.status,
-      0,
-      [regexRun.stderr.trim(), regexRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(regexOut, "status"), "dry_run");
-    assert.equal(readOutput(regexOut, "applied_refs"), "patch/regex");
-    assert.ok(existsSync(path.join(regexWork, "REGEX.txt")));
-    assert.match(readFileSync(regexSummary, "utf8"), /release v1\.1\.0/);
+    expectSuccess(regexRun);
+    expect(readOutput(regexOut, "status")).toBe("dry_run");
+    expect(readOutput(regexOut, "applied_refs")).toBe("patch/regex");
+    expect(existsSync(path.join(regexWork, "REGEX.txt"))).toBe(true);
+    expect(readFileSync(regexSummary, "utf8")).toContain("release v1.1.0");
 
     git(["clone", forkBare, noopWork], tempRoot);
     configureUser(noopWork);
@@ -648,16 +620,11 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       upstreamBare,
     );
 
-    assert.equal(
-      noopRun.status,
-      0,
-      [noopRun.stderr.trim(), noopRun.stdout.trim()].filter(Boolean).join("\n"),
-    );
-    assert.equal(readOutput(noopOut, "status"), "dry_run");
-    assert.equal(readOutput(noopOut, "applied_refs"), "");
-    assert.match(
-      noopRun.stdout,
-      /Skipping patch\/noop; patch produced no staged changes\./,
+    expectSuccess(noopRun);
+    expect(readOutput(noopOut, "status")).toBe("dry_run");
+    expect(readOutput(noopOut, "applied_refs")).toBe("");
+    expect(noopRun.stdout).toContain(
+      "Skipping patch/noop; patch produced no staged changes.",
     );
 
     git(["clone", forkBare, missingWork], tempRoot);
@@ -676,13 +643,12 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       upstreamBare,
     );
 
-    assert.notEqual(missingRun.status, 0);
-    assert.equal(readOutput(missingOut, "failed_bookmark"), "patch/missing");
-    assert.equal(readOutput(missingOut, "applied_refs"), "");
-    assert.equal(readOutput(missingOut, "status"), "missing_patch");
-    assert.match(
-      readFileSync(missingSummary, "utf8"),
-      /patch ref could not be resolved locally or from `origin`/,
+    expect(missingRun.status).not.toBe(0);
+    expect(readOutput(missingOut, "failed_bookmark")).toBe("patch/missing");
+    expect(readOutput(missingOut, "applied_refs")).toBe("");
+    expect(readOutput(missingOut, "status")).toBe("missing_patch");
+    expect(readFileSync(missingSummary, "utf8")).toContain(
+      "patch ref could not be resolved locally or from `origin`",
     );
 
     git(["clone", forkBare, noMatchWork], tempRoot);
@@ -701,8 +667,8 @@ test("integration sync CLI handles release selectors and patch edge cases", () =
       upstreamBare,
     );
 
-    assert.notEqual(noMatchRun.status, 0);
-    assert.match(noMatchRun.stderr, /No upstream release matched selector/);
+    expect(noMatchRun.status).not.toBe(0);
+    expect(noMatchRun.stderr).toContain("No upstream release matched selector");
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }
@@ -782,14 +748,8 @@ test("promote sync CLI promotes tested sync branches onto the base branch", () =
       upstreamBare,
     );
 
-    assert.equal(
-      firstRun.status,
-      0,
-      [firstRun.stderr.trim(), firstRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(firstOut, "status"), "published");
+    expectSuccess(firstRun);
+    expect(readOutput(firstOut, "status")).toBe("published");
     const firstSha = readOutput(firstOut, "sync_sha");
 
     git(["clone", forkBare, promoteWork], tempRoot);
@@ -803,20 +763,13 @@ test("promote sync CLI promotes tested sync branches onto the base branch", () =
       firstSha,
     );
 
-    assert.equal(
-      promote1.status,
-      0,
-      [promote1.stderr.trim(), promote1.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(promote1Out, "status"), "promoted");
-    assert.equal(readOutput(promote1Out, "promoted_sha"), firstSha);
+    expectSuccess(promote1);
+    expect(readOutput(promote1Out, "status")).toBe("promoted");
+    expect(readOutput(promote1Out, "promoted_sha")).toBe(firstSha);
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
-    assert.equal(
+    expect(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "PRODUCT.txt"),
-      "product patch",
-    );
+    ).toBe("product patch");
 
     createUpstreamRelease(
       upstreamWork,
@@ -863,14 +816,8 @@ test("promote sync CLI promotes tested sync branches onto the base branch", () =
       upstreamBare,
     );
 
-    assert.equal(
-      secondRun.status,
-      0,
-      [secondRun.stderr.trim(), secondRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(secondOut, "status"), "published");
+    expectSuccess(secondRun);
+    expect(readOutput(secondOut, "status")).toBe("published");
     const secondSha = readOutput(secondOut, "sync_sha");
 
     const promote2Out = path.join(tempRoot, "promote-2.out");
@@ -882,29 +829,21 @@ test("promote sync CLI promotes tested sync branches onto the base branch", () =
       secondSha,
     );
 
-    assert.equal(
-      promote2.status,
-      0,
-      [promote2.stderr.trim(), promote2.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(promote2Out, "status"), "promoted");
-    assert.equal(readOutput(promote2Out, "promoted_sha"), secondSha);
+    expectSuccess(promote2);
+    expect(readOutput(promote2Out, "status")).toBe("promoted");
+    expect(readOutput(promote2Out, "promoted_sha")).toBe(secondSha);
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
-    assert.equal(
+    expect(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "PRODUCT.txt"),
-      "product patch",
-    );
-    assert.equal(
+    ).toBe("product patch");
+    expect(
       readRemoteFile(
         forkSeed,
         "refs/remotes/origin/sync/integration",
         "PRODUCT.txt",
       ),
-      "product patch",
-    );
-    assert.match(readFileSync(secondSummary, "utf8"), /release v1\.2\.0/);
+    ).toBe("product patch");
+    expect(readFileSync(secondSummary, "utf8")).toContain("release v1.2.0");
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }
@@ -984,13 +923,7 @@ test("promote sync CLI rejects stale tested SHAs and only promotes the current s
       upstreamBare,
     );
 
-    assert.equal(
-      firstRun.status,
-      0,
-      [firstRun.stderr.trim(), firstRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
+    expectSuccess(firstRun);
     const firstSha = readOutput(firstOut, "sync_sha");
 
     git(["clone", forkBare, promoteWork], tempRoot);
@@ -1004,13 +937,7 @@ test("promote sync CLI rejects stale tested SHAs and only promotes the current s
       firstSha,
     );
 
-    assert.equal(
-      promote1.status,
-      0,
-      [promote1.stderr.trim(), promote1.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
+    expectSuccess(promote1);
     commitToOriginBranch(
       forkSeed,
       "main",
@@ -1064,14 +991,8 @@ test("promote sync CLI rejects stale tested SHAs and only promotes the current s
       upstreamBare,
     );
 
-    assert.equal(
-      secondRun.status,
-      0,
-      [secondRun.stderr.trim(), secondRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(secondOut, "status"), "published");
+    expectSuccess(secondRun);
+    expect(readOutput(secondOut, "status")).toBe("published");
     const secondSha = readOutput(secondOut, "sync_sha");
 
     const staleOut = path.join(tempRoot, "promote-stale.out");
@@ -1083,14 +1004,13 @@ test("promote sync CLI rejects stale tested SHAs and only promotes the current s
       firstSha,
     );
 
-    assert.notEqual(stalePromote.status, 0);
-    assert.equal(readOutput(staleOut, "status"), "stale_sync");
-    assert.equal(readOutput(staleOut, "promoted_sha"), "");
+    expect(stalePromote.status).not.toBe(0);
+    expect(readOutput(staleOut, "status")).toBe("stale_sync");
+    expect(readOutput(staleOut, "promoted_sha")).toBe("");
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
-    assert.equal(
+    expect(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
-      "# Base Branch Override",
-    );
+    ).toBe("# Base Branch Override");
 
     const promote2Out = path.join(tempRoot, "promote-2.out");
     const promote2Summary = path.join(tempRoot, "promote-2.summary");
@@ -1101,29 +1021,21 @@ test("promote sync CLI rejects stale tested SHAs and only promotes the current s
       secondSha,
     );
 
-    assert.equal(
-      promote2.status,
-      0,
-      [promote2.stderr.trim(), promote2.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(readOutput(promote2Out, "status"), "promoted");
-    assert.equal(readOutput(promote2Out, "promoted_sha"), secondSha);
+    expectSuccess(promote2);
+    expect(readOutput(promote2Out, "status")).toBe("promoted");
+    expect(readOutput(promote2Out, "promoted_sha")).toBe(secondSha);
     git(["fetch", "origin", "main", "sync/integration"], forkSeed);
-    assert.equal(
+    expect(
       readRemoteFile(forkSeed, "refs/remotes/origin/main", "README.md"),
-      "# Fork Release v1.2.0",
-    );
-    assert.equal(
+    ).toBe("# Fork Release v1.2.0");
+    expect(
       readRemoteFile(
         forkSeed,
         "refs/remotes/origin/sync/integration",
         "README.md",
       ),
-      "# Fork Release v1.2.0",
-    );
-    assert.match(readFileSync(staleSummary, "utf8"), /Expected tested SHA/);
+    ).toBe("# Fork Release v1.2.0");
+    expect(readFileSync(staleSummary, "utf8")).toContain("Expected tested SHA");
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }
@@ -1232,20 +1144,15 @@ test("integration sync CLI applies patches based on older releases when releases
       upstreamBare,
     );
 
-    assert.equal(
-      syncRun.status,
-      0,
-      [syncRun.stderr.trim(), syncRun.stdout.trim()].filter(Boolean).join("\n"),
-    );
-    assert.equal(readOutput(syncOut, "status"), "dry_run");
-    assert.equal(readOutput(syncOut, "applied_refs"), "patch/feature");
-    assert.ok(existsSync(path.join(syncWork, "FEATURE.txt")));
+    expectSuccess(syncRun);
+    expect(readOutput(syncOut, "status")).toBe("dry_run");
+    expect(readOutput(syncOut, "applied_refs")).toBe("patch/feature");
+    expect(existsSync(path.join(syncWork, "FEATURE.txt"))).toBe(true);
     // version.txt should have v1.2.0, not v1.1.0 (the patch base logic avoids
     // re-applying the v1.1.0 release changes on top of v1.2.0)
-    assert.equal(
+    expect(
       readFileSync(path.join(syncWork, "version.txt"), "utf8").trim(),
-      "version=1.2.0",
-    );
+    ).toBe("version=1.2.0");
   } finally {
     rmSync(tempRoot, { force: true, recursive: true });
   }

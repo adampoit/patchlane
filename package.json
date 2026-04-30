@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "node --experimental-strip-types ./scripts/sync-skill-assets.ts && tsc -p tsconfig.json",
-    "test": "npm run build && tsc -p tsconfig.test.json && cd dist-test && node --test",
+    "test": "npm run build && tsc -p tsconfig.test.json && vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run build"
@@ -23,6 +23,7 @@
     "@types/node": "^24.7.2",
     "prettier": "^3.8.3",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.5",
     "yaml": "^2.8.1"
   },
   "license": "MIT",

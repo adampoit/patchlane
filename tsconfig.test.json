@@ -3,9 +3,9 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "outDir": "dist-test",
     "rootDir": ".",
     "strict": true,
+    "noEmit": true,
     "noEmitOnError": true,
     "skipLibCheck": true,
     "esModuleInterop": true

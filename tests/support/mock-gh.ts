@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 type PullRequest = {
   auto_merge: boolean;
@@ -347,4 +348,11 @@ export function main(argv = process.argv.slice(2)) {
   }
 
   fail(`Unsupported gh command: ${command}`);
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
 }

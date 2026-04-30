@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { expect, test } from "vitest";
 import {
   existsSync,
   mkdirSync,
@@ -13,7 +12,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 
-const repoRoot = path.resolve(import.meta.dirname, "..", "..", "..");
+const repoRoot = path.resolve(import.meta.dirname, "..", "..");
 const cliPath = path.join(repoRoot, "dist", "cli.js");
 
 type RunResult = {
@@ -25,6 +24,17 @@ type RunResult = {
 type SkillState = {
   files: Record<string, string>;
 };
+
+function expectSuccess(result: RunResult) {
+  if (result.status !== 0) {
+    throw new Error(
+      [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join("\n") ||
+        `Expected exit status 0, got ${result.status}`,
+    );
+  }
+
+  expect(result.status).toBe(0);
+}
 
 async function run(
   command: string,
@@ -129,21 +139,14 @@ test("agents command installs and updates managed skills", async () => {
       PATCHLANE_SKILLS_BASE_URL: server.baseUrl,
     });
 
-    assert.equal(
-      firstRun.status,
-      0,
-      [firstRun.stderr.trim(), firstRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(
+    expectSuccess(firstRun);
+    expect(
       readFileSync(
         path.join(tempRoot, ".agents/skills/patchlane-fork-setup/SKILL.md"),
         "utf8",
       ),
-      "setup skill v1\n",
-    );
-    assert.equal(
+    ).toBe("setup skill v1\n");
+    expect(
       readFileSync(
         path.join(
           tempRoot,
@@ -151,15 +154,13 @@ test("agents command installs and updates managed skills", async () => {
         ),
         "utf8",
       ),
-      "checklist v1\n",
-    );
-    assert.equal(
+    ).toBe("checklist v1\n");
+    expect(
       readFileSync(
         path.join(tempRoot, ".agents/skills/patchlane-sync-patches/SKILL.md"),
         "utf8",
       ),
-      "sync skill v1\n",
-    );
+    ).toBe("sync skill v1\n");
 
     mkdirSync(path.join(tempRoot, ".agents/skills/custom-skill"), {
       recursive: true,
@@ -196,47 +197,36 @@ test("agents command installs and updates managed skills", async () => {
       PATCHLANE_SKILLS_BASE_URL: server.baseUrl,
     });
 
-    assert.equal(
-      secondRun.status,
-      0,
-      [secondRun.stderr.trim(), secondRun.stdout.trim()]
-        .filter(Boolean)
-        .join("\n"),
-    );
-    assert.equal(
+    expectSuccess(secondRun);
+    expect(
       readFileSync(
         path.join(tempRoot, ".agents/skills/patchlane-fork-setup/SKILL.md"),
         "utf8",
       ),
-      "setup skill v2\n",
-    );
-    assert.equal(
+    ).toBe("setup skill v2\n");
+    expect(
       existsSync(
         path.join(
           tempRoot,
           ".agents/skills/patchlane-fork-setup/references/checklist.md",
         ),
       ),
-      false,
-    );
-    assert.equal(
+    ).toBe(false);
+    expect(
       existsSync(path.join(tempRoot, ".agents/skills/patchlane-sync-patches")),
-      false,
-    );
-    assert.equal(
+    ).toBe(false);
+    expect(
       readFileSync(
         path.join(tempRoot, ".agents/skills/patchlane-maintenance/SKILL.md"),
         "utf8",
       ),
-      "maintenance skill v1\n",
-    );
-    assert.equal(
+    ).toBe("maintenance skill v1\n");
+    expect(
       readFileSync(
         path.join(tempRoot, ".agents/skills/custom-skill/SKILL.md"),
         "utf8",
       ),
-      "custom skill\n",
-    );
+    ).toBe("custom skill\n");
   } finally {
     await server.close();
     rmSync(tempRoot, { force: true, recursive: true });
