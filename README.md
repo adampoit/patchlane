@@ -50,42 +50,42 @@ Create `.github/workflows/sync-upstream.yml` in your fork:
 name: Sync Upstream Integration
 
 on:
-  schedule:
-    - cron: "0 10 * * *"
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Test without pushing changes"
-        type: boolean
-        default: true
+    schedule:
+        - cron: '0 10 * * *'
+    workflow_dispatch:
+        inputs:
+            dry_run:
+                description: 'Test without pushing changes'
+                type: boolean
+                default: true
 
 permissions:
-  contents: write
+    contents: write
 
 jobs:
-  sync:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    sync:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22'
 
-      - name: Run patchlane sync
-        run: npx patchlane@latest sync
-        env:
-          UPSTREAM_OWNER: kubernetes
-          UPSTREAM_REPO: kubernetes
-          BASE_BRANCH: main
-          SYNC_BRANCH: sync/integration
-          PATCH_REFS: |
-            patch/product
-            patch/sync
-            patch/ci
-          DRY_RUN: ${{ inputs.dry_run || false }}
+            - name: Run patchlane sync
+              run: npx patchlane@latest sync
+              env:
+                  UPSTREAM_OWNER: kubernetes
+                  UPSTREAM_REPO: kubernetes
+                  BASE_BRANCH: main
+                  SYNC_BRANCH: sync/integration
+                  PATCH_REFS: |
+                      patch/product
+                      patch/sync
+                      patch/ci
+                  DRY_RUN: ${{ inputs.dry_run || false }}
 ```
 
 ### 3. Add a CI Workflow
@@ -96,18 +96,18 @@ Create `.github/workflows/fork-ci.yml` in your fork. **It must run on `sync_bran
 name: Fork CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - sync/integration
+    pull_request:
+    push:
+        branches:
+            - main
+            - sync/integration
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "Replace this with your fork's actual CI checks."
+    build-and-test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - run: echo "Replace this with your fork's actual CI checks."
 ```
 
 ### 4. Add the Promotion Workflow
@@ -118,34 +118,34 @@ Create `.github/workflows/promote-tested-sync.yml` in your fork:
 name: Promote Tested Sync Branch
 
 on:
-  workflow_run:
-    workflows: ["Fork CI"]
-    types: [completed]
+    workflow_run:
+        workflows: ['Fork CI']
+        types: [completed]
 
 permissions:
-  contents: write
+    contents: write
 
 jobs:
-  promote:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'sync/integration'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    promote:
+        if: >-
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.head_branch == 'sync/integration'
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22'
 
-      - name: Run patchlane promote
-        run: npx patchlane@latest promote
-        env:
-          BASE_BRANCH: main
-          SYNC_BRANCH: sync/integration
-          EXPECTED_SYNC_SHA: ${{ github.event.workflow_run.head_sha }}
+            - name: Run patchlane promote
+              run: npx patchlane@latest promote
+              env:
+                  BASE_BRANCH: main
+                  SYNC_BRANCH: sync/integration
+                  EXPECTED_SYNC_SHA: ${{ github.event.workflow_run.head_sha }}
 ```
 
 ### 5. Run It

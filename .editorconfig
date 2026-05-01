@@ -1,0 +1,26 @@
+# DO NOT EDIT: root convention
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+trim_trailing_whitespace = true
+# END DO NOT EDIT
+
+# DO NOT EDIT: json convention
+[*.json]
+indent_size = 2
+indent_style = space
+# END DO NOT EDIT
+
+# DO NOT EDIT: md convention
+[*.md]
+indent_size = 2
+indent_style = space
+# END DO NOT EDIT
+
+# DO NOT EDIT: yaml convention
+[*.{yml,yaml}]
+indent_size = 2
+indent_style = space
+# END DO NOT EDIT

@@ -1,0 +1,4 @@
+conventions:
+  - path: adampoit/conventions/typescript-project
+    settings:
+      copyright-holder: Adam Poit
