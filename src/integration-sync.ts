@@ -210,6 +210,7 @@ export type IntegrationSyncOptions = {
 	releaseSelector?: string;
 	syncBranch?: string;
 	dryRun?: boolean;
+	noPush?: boolean;
 	allowDependentPatches?: boolean;
 	originRemoteName?: string;
 	upstreamRemoteName?: string;
@@ -245,6 +246,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const releaseSelector = options.releaseSelector ?? '';
 	const syncBranch = options.syncBranch ?? 'sync/integration';
 	const dryRun = options.dryRun ?? false;
+	const noPush = options.noPush ?? false;
 	const allowDependentPatches = options.allowDependentPatches ?? false;
 	const originRemoteName = options.originRemoteName ?? 'origin';
 	const upstreamRemoteName = options.upstreamRemoteName ?? 'upstream';
@@ -298,6 +300,123 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const patchRefs = parsePatchRefs(patchRefsRaw);
 	if (!patchRefs.length) fail('PATCH_REFS did not contain any patch branch names.');
 
+	function resolvePatchBase(ref: string, resolved: string) {
+		const isAncestor =
+			git(['merge-base', '--is-ancestor', upstreamBase, resolved], {
+				allowFailure: true,
+			}).status === 0;
+
+		let diffBase = upstreamBase;
+
+		if (!isAncestor) {
+			const mergeBase = git(['merge-base', upstreamBase, resolved]).stdout.trim();
+			const uniqueCommits = git(['rev-list', '--ancestry-path', `${mergeBase}..${resolved}`]).stdout.trim();
+
+			if (uniqueCommits) {
+				const commits = uniqueCommits.split('\n').filter(Boolean);
+				const oldestUnique = commits[commits.length - 1]!;
+				const tags = git(['tag', '--points-at', oldestUnique], {
+					allowFailure: true,
+				}).stdout.trim();
+
+				if (tags) {
+					diffBase = oldestUnique;
+				} else {
+					const parent = git(['rev-parse', `${oldestUnique}^`], {
+						allowFailure: true,
+					}).stdout.trim();
+					if (parent) diffBase = parent;
+				}
+
+				log(`Patch ${ref} is not based on ${sourceLabel}; using ${diffBase.slice(0, 7)} as patch base`);
+			}
+		}
+
+		return diffBase;
+	}
+
+	function validatePatch(ref: string, resolved: string, diffBase: string) {
+		if (!allowDependentPatches) {
+			const generated = hasGeneratedAncestry(resolved, diffBase);
+			const basedOnSync = isBasedOnSyncBranch(resolved, remoteSyncRef);
+			if (generated || basedOnSync) {
+				const reason = generated
+					? `Patch ref '${ref}' contains generated patchlane commits in its ancestry.`
+					: `Patch ref '${ref}' appears to be based on sync branch output.`;
+				const body = [
+					`- Base: \`${upstreamBase}\``,
+					`- Source: \`${sourceLabel}\``,
+					`- Failed bookmark: \`${ref}\``,
+					`- Reason: ${reason}`,
+				].join('\n');
+				writeOutput('failed_bookmark', ref);
+				writeOutput('failed_commit', '');
+				writeOutput('conflicted_paths', '');
+				writeOutput('applied_refs', '');
+				writeOutput('sync_branch', syncBranch);
+				writeOutput('status', 'invalid_patch');
+				writeSummary(
+					'## Integration rebuild failed',
+					body,
+					'Recreate the patch branch from the upstream release or use --allow-dependent-patches.',
+				);
+				fail(`${reason} Recreate the patch branch from the upstream release or use --allow-dependent-patches.`);
+			}
+		}
+	}
+
+	if (dryRun) {
+		log(`Validating ${patchRefs.length} patch ref(s) for ${syncBranch}`);
+		const diagnostics: string[] = [];
+		for (const ref of patchRefs) {
+			const resolved = resolvePatchRef(ref, originRemoteName);
+			if (!resolved) {
+				fail(`Patch ref '${ref}' could not be resolved locally or from ${originRemoteName}.`);
+			}
+			const diffBase = resolvePatchBase(ref, resolved);
+			validatePatch(ref, resolved, diffBase);
+
+			const commitRange = `${diffBase}..${resolved}`;
+			const commitShas = git(['rev-list', '--no-merges', '--reverse', commitRange], {
+				allowFailure: true,
+			})
+				.stdout.trim()
+				.split('\n')
+				.filter(Boolean);
+			const changedFiles = git(['diff', '--name-only', `${diffBase}...${resolved}`], {
+				allowFailure: true,
+			})
+				.stdout.trim()
+				.split('\n')
+				.filter(Boolean);
+
+			diagnostics.push(`- **${ref}** — ${commitShas.length} commit(s), ${changedFiles.length} file(s) changed`);
+			if (changedFiles.length) {
+				diagnostics.push(bulletList(changedFiles));
+			}
+		}
+
+		writeOutput('failed_bookmark', '');
+		writeOutput('failed_commit', '');
+		writeOutput('conflicted_paths', '');
+		writeOutput('applied_refs', patchRefs.join('\n'));
+		writeOutput('sync_branch', syncBranch);
+		writeOutput('status', 'dry_run');
+		writeSummary(
+			'## Integration rebuild validated',
+			[
+				`- Base: \`${upstreamBase}\``,
+				`- Source: \`${sourceLabel}\``,
+				`- Output branch: \`${syncBranch}\``,
+				`- Promotion target: \`${baseBranch}\``,
+				'- Mode: dry run (no local changes)',
+			].join('\n'),
+			`### Patch diagnostics\n\n${diagnostics.join('\n')}`,
+		);
+		log('Dry run enabled; no local changes applied.');
+		return;
+	}
+
 	log(`Building ${syncBranch} from ${sourceLabel}`);
 	git(['checkout', '-B', syncBranch, upstreamBase]);
 
@@ -322,65 +441,8 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			fail(`Patch ref '${ref}' could not be resolved locally or from ${originRemoteName}.`);
 		}
 
-		const isAncestor =
-			git(['merge-base', '--is-ancestor', upstreamBase, resolved], {
-				allowFailure: true,
-			}).status === 0;
-
-		let diffBase = upstreamBase;
-
-		if (!isAncestor) {
-			const mergeBase = git(['merge-base', upstreamBase, resolved]).stdout.trim();
-			const uniqueCommits = git(['rev-list', '--ancestry-path', `${mergeBase}..${resolved}`]).stdout.trim();
-
-			if (uniqueCommits) {
-				const commits = uniqueCommits.split('\n').filter(Boolean);
-				const oldestUnique = commits[commits.length - 1]!;
-				const tags = git(['tag', '--points-at', oldestUnique], {
-					allowFailure: true,
-				}).stdout.trim();
-
-				if (tags) {
-					// oldestUnique is tagged (likely a release the patch was based on)
-					diffBase = oldestUnique;
-				} else {
-					const parent = git(['rev-parse', `${oldestUnique}^`], {
-						allowFailure: true,
-					}).stdout.trim();
-					if (parent) diffBase = parent;
-				}
-
-				log(`Patch ${ref} is not based on ${sourceLabel}; using ${diffBase.slice(0, 7)} as patch base`);
-			}
-		}
-
-		if (!allowDependentPatches) {
-			const generated = hasGeneratedAncestry(resolved, diffBase);
-			const basedOnSync = isBasedOnSyncBranch(resolved, remoteSyncRef);
-			if (generated || basedOnSync) {
-				const reason = generated
-					? `Patch ref '${ref}' contains generated patchlane commits in its ancestry.`
-					: `Patch ref '${ref}' appears to be based on sync branch output.`;
-				const body = [
-					`- Base: \`${upstreamBase}\``,
-					`- Source: \`${sourceLabel}\``,
-					`- Failed bookmark: \`${ref}\``,
-					`- Reason: ${reason}`,
-				].join('\n');
-				writeOutput('failed_bookmark', ref);
-				writeOutput('failed_commit', '');
-				writeOutput('conflicted_paths', '');
-				writeOutput('applied_refs', appliedRefs.join('\n'));
-				writeOutput('sync_branch', syncBranch);
-				writeOutput('status', 'invalid_patch');
-				writeSummary(
-					'## Integration rebuild failed',
-					body,
-					'Recreate the patch branch from the upstream release or use --allow-dependent-patches.',
-				);
-				fail(`${reason} Recreate the patch branch from the upstream release or use --allow-dependent-patches.`);
-			}
-		}
+		const diffBase = resolvePatchBase(ref, resolved);
+		validatePatch(ref, resolved, diffBase);
 
 		const commitRange = `${diffBase}..${resolved}`;
 		const commitsToReplay = git(['rev-list', '--no-merges', '--reverse', commitRange], {
@@ -481,9 +543,9 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	writeOutput('sync_branch', syncBranch);
 	const rebuiltSyncSha = git(['rev-parse', 'HEAD']).stdout.trim();
 
-	if (dryRun) {
+	if (noPush) {
 		writeOutput('sync_sha', rebuiltSyncSha);
-		writeOutput('status', 'dry_run');
+		writeOutput('status', 'no_push');
 		writeSummary(
 			'## Integration rebuild completed',
 			[
@@ -491,11 +553,11 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 				`- Source: \`${sourceLabel}\``,
 				`- Output branch: \`${syncBranch}\``,
 				`- Promotion target: \`${baseBranch}\``,
-				'- Mode: dry run',
+				'- Mode: no push',
 			].join('\n'),
 			appliedRefs.length ? `### Applied patches\n\n${bulletList(appliedRefs)}` : '',
 		);
-		log('Dry run enabled; skipping push and promotion operations.');
+		log('No-push enabled; skipping push and promotion operations.');
 		return;
 	}
 
@@ -555,6 +617,7 @@ function main() {
 		releaseSelector: getEnv('RELEASE_SELECTOR'),
 		syncBranch: getEnv('SYNC_BRANCH', 'sync/integration'),
 		dryRun: isTrue(getEnv('DRY_RUN', 'false')),
+		noPush: isTrue(getEnv('NO_PUSH', 'false')),
 		allowDependentPatches: isTrue(getEnv('ALLOW_DEPENDENT_PATCHES', 'false')),
 		originRemoteName: getEnv('ORIGIN_REMOTE_NAME', 'origin'),
 		upstreamRemoteName: getEnv('UPSTREAM_REMOTE_NAME', 'upstream'),

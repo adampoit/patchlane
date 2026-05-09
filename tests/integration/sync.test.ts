@@ -123,8 +123,10 @@ function runSync(
 	patchRefs: string,
 	upstreamRef: string,
 	releaseSelector: string,
-	dryRun: boolean,
+	noPush: boolean,
 	upstreamRemoteUrl: string,
+	allowDependentPatches = false,
+	dryRun = false,
 ) {
 	const launcherDir = mkdtempSync(path.join(tmpdir(), 'patchlane-gh-'));
 	createLauncher(launcherDir);
@@ -143,7 +145,9 @@ function runSync(
 		SYNC_BRANCH: 'sync/integration',
 		PATCH_REFS: patchRefs,
 		DRY_RUN: dryRun ? 'true' : 'false',
+		NO_PUSH: noPush ? 'true' : 'false',
 		UPSTREAM_REMOTE_URL: upstreamRemoteUrl,
+		ALLOW_DEPENDENT_PATCHES: allowDependentPatches ? 'true' : 'false',
 	};
 
 	const result = run('node', [cliPath], worktree, env);
@@ -304,7 +308,7 @@ test('integration sync CLI rebuilds from releases and branch refs', () => {
 		);
 
 		expectSuccess(run3);
-		expect(readOutput(run3Out, 'status')).toBe('dry_run');
+		expect(readOutput(run3Out, 'status')).toBe('no_push');
 		expect(existsSync(path.join(branchWork, 'BRANCH.txt'))).toBe(true);
 		expect(existsSync(path.join(branchWork, 'BRANCH-PATCH.txt'))).toBe(true);
 
@@ -436,7 +440,7 @@ test('integration sync CLI handles release selectors and patch edge cases', () =
 		);
 
 		expectSuccess(prereleaseRun);
-		expect(readOutput(prereleaseOut, 'status')).toBe('dry_run');
+		expect(readOutput(prereleaseOut, 'status')).toBe('no_push');
 		expect(readOutput(prereleaseOut, 'applied_refs')).toBe('patch/prerelease');
 		expect(existsSync(path.join(prereleaseWork, 'RC.txt'))).toBe(true);
 		expect(readFileSync(prereleaseSummary, 'utf8')).toContain('release v1.2.0-rc.1');
@@ -458,7 +462,7 @@ test('integration sync CLI handles release selectors and patch edge cases', () =
 		);
 
 		expectSuccess(regexRun);
-		expect(readOutput(regexOut, 'status')).toBe('dry_run');
+		expect(readOutput(regexOut, 'status')).toBe('no_push');
 		expect(readOutput(regexOut, 'applied_refs')).toBe('patch/regex');
 		expect(existsSync(path.join(regexWork, 'REGEX.txt'))).toBe(true);
 		expect(readFileSync(regexSummary, 'utf8')).toContain('release v1.1.0');
@@ -480,7 +484,7 @@ test('integration sync CLI handles release selectors and patch edge cases', () =
 		);
 
 		expectSuccess(noopRun);
-		expect(readOutput(noopOut, 'status')).toBe('dry_run');
+		expect(readOutput(noopOut, 'status')).toBe('no_push');
 		expect(readOutput(noopOut, 'applied_refs')).toBe('');
 		expect(noopRun.stdout).toContain('Skipping patch/noop; patch produced no staged changes.');
 
@@ -526,6 +530,80 @@ test('integration sync CLI handles release selectors and patch edge cases', () =
 
 		expect(noMatchRun.status).not.toBe(0);
 		expect(noMatchRun.stderr).toContain('No upstream release matched selector');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI dry-run validates without creating local branch', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const dryRunWork = path.join(tempRoot, 'dry-run-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		createPatchBranch(forkSeed, 'patch/product', 'v1.1.0', 'PRODUCT.txt', 'product patch');
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, dryRunWork], tempRoot);
+		configureUser(dryRunWork);
+		const dryRunOut = path.join(tempRoot, 'dry-run.out');
+		const dryRunSummary = path.join(tempRoot, 'dry-run.summary');
+		const dryRunResult = runSync(
+			dryRunWork,
+			stateDir,
+			dryRunOut,
+			dryRunSummary,
+			'patch/product',
+			'main',
+			'latest',
+			false, // noPush
+			upstreamBare,
+			false, // allowDependentPatches
+			true, // dryRun
+		);
+
+		expectSuccess(dryRunResult);
+		expect(readOutput(dryRunOut, 'status')).toBe('dry_run');
+		expect(readOutput(dryRunOut, 'applied_refs')).toBe('patch/product');
+		// The local sync/integration branch should NOT have been created
+		expect(run('git', ['rev-parse', '--verify', '--quiet', 'sync/integration'], dryRunWork).status).not.toBe(0);
+		expect(existsSync(path.join(dryRunWork, 'PRODUCT.txt'))).toBe(false);
+		expect(readFileSync(dryRunSummary, 'utf8')).toContain('Patch diagnostics');
+		expect(readFileSync(dryRunSummary, 'utf8')).toContain('patch/product');
+		expect(readFileSync(dryRunSummary, 'utf8')).toContain('PRODUCT.txt');
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}
@@ -884,12 +962,456 @@ test('integration sync CLI applies patches based on older releases when releases
 		);
 
 		expectSuccess(syncRun);
-		expect(readOutput(syncOut, 'status')).toBe('dry_run');
+		expect(readOutput(syncOut, 'status')).toBe('no_push');
 		expect(readOutput(syncOut, 'applied_refs')).toBe('patch/feature');
 		expect(existsSync(path.join(syncWork, 'FEATURE.txt'))).toBe(true);
 		// version.txt should have v1.2.0, not v1.1.0 (the patch base logic avoids
 		// re-applying the v1.1.0 release changes on top of v1.2.0)
 		expect(readFileSync(path.join(syncWork, 'version.txt'), 'utf8').trim()).toBe('version=1.2.0');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+function createMultiCommitPatchBranch(
+	repo: string,
+	branch: string,
+	baseRef: string,
+	files: { path: string; content: string; message: string }[],
+) {
+	git(['fetch', 'upstream', '--tags', '--prune'], repo);
+	git(['checkout', '-B', branch, baseRef], repo);
+	for (const file of files) {
+		mkdirSync(path.join(repo, path.dirname(file.path)), { recursive: true });
+		writeFileSync(path.join(repo, file.path), `${file.content}\n`);
+		git(['add', file.path], repo);
+		git(['commit', '-m', file.message], repo);
+	}
+	git(['push', '-f', 'origin', branch], repo);
+}
+
+test('integration sync CLI replays multi-commit patches and preserves metadata', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const syncWork = path.join(tempRoot, 'sync-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		createMultiCommitPatchBranch(forkSeed, 'patch/multi', 'v1.1.0', [
+			{ path: 'A.txt', content: 'a', message: 'Add A' },
+			{ path: 'B.txt', content: 'b', message: 'Add B' },
+		]);
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, syncWork], tempRoot);
+		configureUser(syncWork);
+		const syncOut = path.join(tempRoot, 'sync.out');
+		const syncSummary = path.join(tempRoot, 'sync.summary');
+		const syncRun = runSync(
+			syncWork,
+			stateDir,
+			syncOut,
+			syncSummary,
+			'patch/multi',
+			'main',
+			'latest',
+			true,
+			upstreamBare,
+		);
+
+		expectSuccess(syncRun);
+		expect(readOutput(syncOut, 'status')).toBe('no_push');
+		expect(readOutput(syncOut, 'applied_refs')).toBe('patch/multi');
+
+		const newCommits = git(['rev-list', '--reverse', 'HEAD~2..HEAD'], syncWork).split('\n').filter(Boolean);
+		expect(newCommits.length).toBe(2);
+
+		const firstSubject = git(['log', '-1', '--format=%s', newCommits[0]!], syncWork);
+		expect(firstSubject).toBe('Add A');
+		const firstBody = git(['log', '-1', '--format=%b', newCommits[0]!], syncWork);
+		expect(firstBody).toContain('Patch-Ref: patch/multi');
+		expect(firstBody).toContain('Original-Commit:');
+
+		const secondSubject = git(['log', '-1', '--format=%s', newCommits[1]!], syncWork);
+		expect(secondSubject).toBe('Add B');
+		const secondBody = git(['log', '-1', '--format=%b', newCommits[1]!], syncWork);
+		expect(secondBody).toContain('Patch-Ref: patch/multi');
+		expect(secondBody).toContain('Original-Commit:');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI rejects patches based on sync branch output', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const firstWork = path.join(tempRoot, 'first-work');
+		const secondWork = path.join(tempRoot, 'second-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		createPatchBranch(forkSeed, 'patch/first', 'v1.1.0', 'FIRST.txt', 'first patch');
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, firstWork], tempRoot);
+		configureUser(firstWork);
+		const firstOut = path.join(tempRoot, 'first.out');
+		const firstSummary = path.join(tempRoot, 'first.summary');
+		const firstRun = runSync(
+			firstWork,
+			stateDir,
+			firstOut,
+			firstSummary,
+			'patch/first',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+		);
+
+		expectSuccess(firstRun);
+		expect(readOutput(firstOut, 'status')).toBe('published');
+
+		git(['fetch', 'origin', 'sync/integration'], forkSeed);
+		createPatchBranch(forkSeed, 'patch/second', 'origin/sync/integration', 'SECOND.txt', 'second patch');
+
+		git(['clone', forkBare, secondWork], tempRoot);
+		configureUser(secondWork);
+		const secondOut = path.join(tempRoot, 'second.out');
+		const secondSummary = path.join(tempRoot, 'second.summary');
+		const secondRun = runSync(
+			secondWork,
+			stateDir,
+			secondOut,
+			secondSummary,
+			'patch/second',
+			'main',
+			'latest',
+			true,
+			upstreamBare,
+		);
+
+		expect(secondRun.status).not.toBe(0);
+		expect(readOutput(secondOut, 'failed_bookmark')).toBe('patch/second');
+		expect(readOutput(secondOut, 'status')).toBe('invalid_patch');
+		expect(secondRun.stderr).toMatch(/generated patchlane commits|based on sync branch output/);
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI rejects patches containing generated ancestry', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const syncWork = path.join(tempRoot, 'sync-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+
+		// Create a branch with an old-style generated commit
+		git(['fetch', 'upstream', '--tags', '--prune'], forkSeed);
+		git(['checkout', '-B', 'patch/old-style', 'v1.1.0'], forkSeed);
+		writeFileSync(path.join(forkSeed, 'OLD.txt'), 'old\n');
+		git(['add', 'OLD.txt'], forkSeed);
+		git(['commit', '-m', 'apply patch/old-style'], forkSeed);
+		git(['push', '-f', 'origin', 'patch/old-style'], forkSeed);
+
+		// Create a patch on top of the generated commit
+		git(['checkout', '-B', 'patch/dependent', 'patch/old-style'], forkSeed);
+		writeFileSync(path.join(forkSeed, 'DEP.txt'), 'dep\n');
+		git(['add', 'DEP.txt'], forkSeed);
+		git(['commit', '-m', 'Add dependent patch'], forkSeed);
+		git(['push', '-f', 'origin', 'patch/dependent'], forkSeed);
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, syncWork], tempRoot);
+		configureUser(syncWork);
+		const syncOut = path.join(tempRoot, 'sync.out');
+		const syncSummary = path.join(tempRoot, 'sync.summary');
+		const syncRun = runSync(
+			syncWork,
+			stateDir,
+			syncOut,
+			syncSummary,
+			'patch/dependent',
+			'main',
+			'latest',
+			true,
+			upstreamBare,
+		);
+
+		expect(syncRun.status).not.toBe(0);
+		expect(readOutput(syncOut, 'failed_bookmark')).toBe('patch/dependent');
+		expect(readOutput(syncOut, 'status')).toBe('invalid_patch');
+		expect(syncRun.stderr).toContain('generated patchlane commits');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI allows dependent patches with --allow-dependent-patches', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const firstWork = path.join(tempRoot, 'first-work');
+		const secondWork = path.join(tempRoot, 'second-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		createPatchBranch(forkSeed, 'patch/first', 'v1.1.0', 'FIRST.txt', 'first patch');
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, firstWork], tempRoot);
+		configureUser(firstWork);
+		const firstOut = path.join(tempRoot, 'first.out');
+		const firstSummary = path.join(tempRoot, 'first.summary');
+		const firstRun = runSync(
+			firstWork,
+			stateDir,
+			firstOut,
+			firstSummary,
+			'patch/first',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+		);
+
+		expectSuccess(firstRun);
+		expect(readOutput(firstOut, 'status')).toBe('published');
+
+		git(['fetch', 'origin', 'sync/integration'], forkSeed);
+		createPatchBranch(forkSeed, 'patch/second', 'origin/sync/integration', 'SECOND.txt', 'second patch');
+
+		git(['clone', forkBare, secondWork], tempRoot);
+		configureUser(secondWork);
+		const secondOut = path.join(tempRoot, 'second.out');
+		const secondSummary = path.join(tempRoot, 'second.summary');
+		const secondRun = runSync(
+			secondWork,
+			stateDir,
+			secondOut,
+			secondSummary,
+			'patch/second',
+			'main',
+			'latest',
+			true,
+			upstreamBare,
+			true, // allowDependentPatches
+		);
+
+		expectSuccess(secondRun);
+		expect(readOutput(secondOut, 'status')).toBe('no_push');
+		expect(readOutput(secondOut, 'applied_refs')).toBe('patch/second');
+		expect(existsSync(path.join(secondWork, 'FIRST.txt'))).toBe(true);
+		expect(existsSync(path.join(secondWork, 'SECOND.txt'))).toBe(true);
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI handles workflow file deletions and additions cleanly', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const syncWork = path.join(tempRoot, 'sync-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		mkdirSync(path.join(upstreamWork, '.github', 'workflows'), { recursive: true });
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'ci.yml'), 'name: Upstream CI\n');
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', '.github/workflows/ci.yml', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+
+		// Create patch that deletes ci.yml and adds new-ci.yml
+		git(['fetch', 'upstream', '--tags', '--prune'], forkSeed);
+		git(['checkout', '-B', 'patch/workflows', 'v1.1.0'], forkSeed);
+		rmSync(path.join(forkSeed, '.github', 'workflows', 'ci.yml'));
+		git(['rm', '.github/workflows/ci.yml'], forkSeed);
+		mkdirSync(path.join(forkSeed, '.github', 'workflows'), { recursive: true });
+		writeFileSync(path.join(forkSeed, '.github', 'workflows', 'new-ci.yml'), 'name: New CI\n');
+		git(['add', '.github/workflows/new-ci.yml'], forkSeed);
+		git(['commit', '-m', 'Replace workflows'], forkSeed);
+		git(['push', '-f', 'origin', 'patch/workflows'], forkSeed);
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, syncWork], tempRoot);
+		configureUser(syncWork);
+		const syncOut = path.join(tempRoot, 'sync.out');
+		const syncSummary = path.join(tempRoot, 'sync.summary');
+		const syncRun = runSync(
+			syncWork,
+			stateDir,
+			syncOut,
+			syncSummary,
+			'patch/workflows',
+			'main',
+			'latest',
+			true,
+			upstreamBare,
+		);
+
+		expectSuccess(syncRun);
+		expect(readOutput(syncOut, 'status')).toBe('no_push');
+		expect(readOutput(syncOut, 'applied_refs')).toBe('patch/workflows');
+		expect(existsSync(path.join(syncWork, '.github', 'workflows', 'new-ci.yml'))).toBe(true);
+		expect(existsSync(path.join(syncWork, '.github', 'workflows', 'ci.yml'))).toBe(false);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}

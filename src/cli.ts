@@ -50,7 +50,8 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 	.option('--sync-branch <branch>', 'Published generated branch name', {
 		default: env('SYNC_BRANCH', 'sync/integration'),
 	})
-	.option('--dry-run', 'Test patches without pushing')
+	.option('--dry-run', 'Validate patches without creating the sync branch')
+	.option('--no-push', 'Build the sync branch locally but do not push')
 	.option('--allow-dependent-patches', 'Allow patch refs that depend on generated sync output')
 	.option('--origin-remote-name <name>', 'Name of the origin remote', {
 		default: env('ORIGIN_REMOTE_NAME', 'origin'),
@@ -87,6 +88,7 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 			releaseSelector: args.releaseSelector,
 			syncBranch: args.syncBranch,
 			dryRun: args.dryRun === true || env('DRY_RUN') === 'true',
+			noPush: args.noPush === true || env('NO_PUSH') === 'true',
 			allowDependentPatches: args.allowDependentPatches === true,
 			originRemoteName: args.originRemoteName,
 			upstreamRemoteName: args.upstreamRemoteName,
