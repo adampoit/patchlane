@@ -5,7 +5,7 @@ description: Update patch branches in a Patchlane-managed fork so `npx patchlane
 
 # Patchlane Patch Refresh
 
-Start by reproducing the problem instead of guessing. Inspect the fork's Patchlane workflow configuration, resolve the current ordered `PATCH_REFS`, and run or review `npx patchlane sync` in dry-run mode so the first failing patch branch is explicit.
+Start by reproducing the problem instead of guessing. Inspect the fork's Patchlane workflow configuration, resolve the current ordered `PATCH_REFS`, and run or review `npx patchlane sync --no-push` so the first failing patch branch is explicit.
 
 Use this workflow:
 
@@ -14,7 +14,7 @@ Use this workflow:
 3. Update only the failing branch first. Rebase, restack, or recreate it on the current upstream base so its change is intentional and minimal.
 4. If later patch branches depend on earlier ones, restack them in order after fixing the first conflict.
 5. Keep workflow and CI adjustments on patch branches rather than the generated base branch.
-6. Re-run `npx patchlane sync --dry-run` after each meaningful fix until the full stack applies cleanly.
+6. Re-run `npx patchlane sync --no-push` after each meaningful fix until the full stack applies cleanly.
 
 Use these heuristics:
 
@@ -35,5 +35,5 @@ Finish by summarizing:
 
 - which patch branch or branches changed
 - whether patch ordering changed
-- whether `npx patchlane sync --dry-run` now succeeds cleanly
+- whether `npx patchlane sync --no-push` now succeeds cleanly
 - any remaining follow-up work before automation is re-enabled

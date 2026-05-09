@@ -5,11 +5,11 @@ on:
     - cron: '0 10 * * *'
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: Skip push operations.
+      no_push:
+        description: Build the sync branch locally but do not push.
         type: boolean
         required: false
-        default: true
+        default: false
       upstream_ref:
         description: Upstream branch ref to rebuild from when release_selector is blank.
         type: string
@@ -52,4 +52,4 @@ jobs:
           RELEASE_SELECTOR: ${{ inputs.release_selector || 'latest' }}
           SYNC_BRANCH: sync/integration
           PATCH_REFS: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
-          DRY_RUN: ${{ inputs.dry_run || false }}
+          NO_PUSH: ${{ inputs.no_push || false }}

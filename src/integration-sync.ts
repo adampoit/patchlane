@@ -300,16 +300,28 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const patchRefs = parsePatchRefs(patchRefsRaw);
 	if (!patchRefs.length) fail('PATCH_REFS did not contain any patch branch names.');
 
-	function resolvePatchBase(ref: string, resolved: string) {
+	type PatchDiagnostic = {
+		ref: string;
+		resolvedSha: string;
+		mergeBase: string;
+		diffBase: string;
+		commitSubjects: string[];
+		changedFiles: string[];
+		warnings: string[];
+	};
+
+	function gatherPatchDiagnostics(ref: string, resolved: string): PatchDiagnostic {
+		const resolvedSha = git(['rev-parse', `${resolved}^{commit}`]).stdout.trim();
 		const isAncestor =
 			git(['merge-base', '--is-ancestor', upstreamBase, resolved], {
 				allowFailure: true,
 			}).status === 0;
 
 		let diffBase = upstreamBase;
+		let mergeBase = upstreamBase;
 
 		if (!isAncestor) {
-			const mergeBase = git(['merge-base', upstreamBase, resolved]).stdout.trim();
+			mergeBase = git(['merge-base', upstreamBase, resolved]).stdout.trim();
 			const uniqueCommits = git(['rev-list', '--ancestry-path', `${mergeBase}..${resolved}`]).stdout.trim();
 
 			if (uniqueCommits) {
@@ -332,7 +344,30 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			}
 		}
 
-		return diffBase;
+		const commitRange = `${diffBase}..${resolved}`;
+		const commitShas = git(['rev-list', '--no-merges', '--reverse', commitRange], {
+			allowFailure: true,
+		})
+			.stdout.trim()
+			.split('\n')
+			.filter(Boolean);
+		const commitSubjects = commitShas.map((sha) => git(['log', '-1', '--format=%s', sha]).stdout.trim());
+		const changedFiles = git(['diff', '--name-only', `${diffBase}...${resolved}`], {
+			allowFailure: true,
+		})
+			.stdout.trim()
+			.split('\n')
+			.filter(Boolean);
+
+		const warnings: string[] = [];
+		if (hasGeneratedAncestry(resolved, diffBase)) {
+			warnings.push('Contains generated patchlane commits in ancestry');
+		}
+		if (isBasedOnSyncBranch(resolved, remoteSyncRef)) {
+			warnings.push('Appears to be based on sync branch output');
+		}
+
+		return { ref, resolvedSha, mergeBase, diffBase, commitSubjects, changedFiles, warnings };
 	}
 
 	function validatePatch(ref: string, resolved: string, diffBase: string) {
@@ -365,35 +400,44 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		}
 	}
 
+	function formatPatchDiagnostic(d: PatchDiagnostic): string {
+		const lines: string[] = [`#### ${d.ref}`];
+		lines.push(`- Resolved: \`${d.resolvedSha.slice(0, 7)}\``);
+		if (d.mergeBase !== upstreamBase) {
+			lines.push(`- Merge base: \`${d.mergeBase.slice(0, 7)}\` (not based on ${sourceLabel})`);
+		}
+		lines.push(`- Diff base: \`${d.diffBase.slice(0, 7)}\``);
+		lines.push(`- Commits: ${d.commitSubjects.length}`);
+		for (const subject of d.commitSubjects) {
+			lines.push(`  - ${subject}`);
+		}
+		if (d.changedFiles.length) {
+			lines.push('- Files changed:');
+			for (const file of d.changedFiles) {
+				lines.push(`  - \`${file}\``);
+			}
+		}
+		for (const warning of d.warnings) {
+			lines.push(`- ⚠️ ${warning}`);
+		}
+		return lines.join('\n');
+	}
+
+	function formatDiagnosticsSection(diagnostics: PatchDiagnostic[]): string {
+		return `### Patch diagnostics\n\n${diagnostics.map(formatPatchDiagnostic).join('\n\n')}`;
+	}
+
 	if (dryRun) {
 		log(`Validating ${patchRefs.length} patch ref(s) for ${syncBranch}`);
-		const diagnostics: string[] = [];
+		const diagnostics: PatchDiagnostic[] = [];
 		for (const ref of patchRefs) {
 			const resolved = resolvePatchRef(ref, originRemoteName);
 			if (!resolved) {
 				fail(`Patch ref '${ref}' could not be resolved locally or from ${originRemoteName}.`);
 			}
-			const diffBase = resolvePatchBase(ref, resolved);
-			validatePatch(ref, resolved, diffBase);
-
-			const commitRange = `${diffBase}..${resolved}`;
-			const commitShas = git(['rev-list', '--no-merges', '--reverse', commitRange], {
-				allowFailure: true,
-			})
-				.stdout.trim()
-				.split('\n')
-				.filter(Boolean);
-			const changedFiles = git(['diff', '--name-only', `${diffBase}...${resolved}`], {
-				allowFailure: true,
-			})
-				.stdout.trim()
-				.split('\n')
-				.filter(Boolean);
-
-			diagnostics.push(`- **${ref}** — ${commitShas.length} commit(s), ${changedFiles.length} file(s) changed`);
-			if (changedFiles.length) {
-				diagnostics.push(bulletList(changedFiles));
-			}
+			const d = gatherPatchDiagnostics(ref, resolved);
+			validatePatch(ref, resolved, d.diffBase);
+			diagnostics.push(d);
 		}
 
 		writeOutput('failed_bookmark', '');
@@ -411,7 +455,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 				`- Promotion target: \`${baseBranch}\``,
 				'- Mode: dry run (no local changes)',
 			].join('\n'),
-			`### Patch diagnostics\n\n${diagnostics.join('\n')}`,
+			formatDiagnosticsSection(diagnostics),
 		);
 		log('Dry run enabled; no local changes applied.');
 		return;
@@ -421,6 +465,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	git(['checkout', '-B', syncBranch, upstreamBase]);
 
 	const appliedRefs: string[] = [];
+	const patchDiagnostics: PatchDiagnostic[] = [];
 
 	for (const ref of patchRefs) {
 		const resolved = resolvePatchRef(ref, originRemoteName);
@@ -441,10 +486,11 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			fail(`Patch ref '${ref}' could not be resolved locally or from ${originRemoteName}.`);
 		}
 
-		const diffBase = resolvePatchBase(ref, resolved);
-		validatePatch(ref, resolved, diffBase);
+		const d = gatherPatchDiagnostics(ref, resolved);
+		validatePatch(ref, resolved, d.diffBase);
+		patchDiagnostics.push(d);
 
-		const commitRange = `${diffBase}..${resolved}`;
+		const commitRange = `${d.diffBase}..${resolved}`;
 		const commitsToReplay = git(['rev-list', '--no-merges', '--reverse', commitRange], {
 			allowFailure: true,
 		});
@@ -519,7 +565,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 
 			const headSubject = git(['log', '-1', '--format=%s', 'HEAD']).stdout.trim();
 			const headBody = git(['log', '-1', '--format=%b', 'HEAD']).stdout.trim();
-			const patchBaseSha = git(['rev-parse', diffBase]).stdout.trim();
+			const patchBaseSha = git(['rev-parse', d.diffBase]).stdout.trim();
 			const trailers = `Patch-Ref: ${ref}\nPatch-Base: ${patchBaseSha}\nOriginal-Commit: ${commitSha}`;
 			const newMessage = headBody
 				? `${headSubject}\n\n${headBody}\n\n${trailers}`
@@ -543,6 +589,17 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	writeOutput('sync_branch', syncBranch);
 	const rebuiltSyncSha = git(['rev-parse', 'HEAD']).stdout.trim();
 
+	function buildSummarySections(): string {
+		const parts: string[] = [];
+		if (appliedRefs.length) {
+			parts.push(`### Applied patches\n\n${bulletList(appliedRefs)}`);
+		}
+		if (patchDiagnostics.length) {
+			parts.push(formatDiagnosticsSection(patchDiagnostics));
+		}
+		return parts.join('\n\n');
+	}
+
 	if (noPush) {
 		writeOutput('sync_sha', rebuiltSyncSha);
 		writeOutput('status', 'no_push');
@@ -555,7 +612,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 				`- Promotion target: \`${baseBranch}\``,
 				'- Mode: no push',
 			].join('\n'),
-			appliedRefs.length ? `### Applied patches\n\n${bulletList(appliedRefs)}` : '',
+			buildSummarySections(),
 		);
 		log('No-push enabled; skipping push and promotion operations.');
 		return;
@@ -582,7 +639,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 					`- Published SHA: \`${remoteSyncSha}\``,
 					'- Reason: rebuilt branch tree matches the current published sync branch.',
 				].join('\n'),
-				appliedRefs.length ? `### Applied patches\n\n${bulletList(appliedRefs)}` : '',
+				buildSummarySections(),
 			);
 			log(`Skipping push for ${syncBranch}; rebuilt tree matches ${originRemoteName}/${syncBranch}.`);
 			return;
@@ -602,7 +659,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			`- Output branch: \`${syncBranch}\``,
 			`- Promotion target: \`${baseBranch}\``,
 		].join('\n'),
-		appliedRefs.length ? `### Applied patches\n\n${bulletList(appliedRefs)}` : '',
+		buildSummarySections(),
 	);
 	log("Integration sync completed with status 'published'");
 }

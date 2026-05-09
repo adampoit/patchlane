@@ -601,9 +601,14 @@ test('integration sync CLI dry-run validates without creating local branch', () 
 		// The local sync/integration branch should NOT have been created
 		expect(run('git', ['rev-parse', '--verify', '--quiet', 'sync/integration'], dryRunWork).status).not.toBe(0);
 		expect(existsSync(path.join(dryRunWork, 'PRODUCT.txt'))).toBe(false);
-		expect(readFileSync(dryRunSummary, 'utf8')).toContain('Patch diagnostics');
-		expect(readFileSync(dryRunSummary, 'utf8')).toContain('patch/product');
-		expect(readFileSync(dryRunSummary, 'utf8')).toContain('PRODUCT.txt');
+		const summary = readFileSync(dryRunSummary, 'utf8');
+		expect(summary).toContain('Patch diagnostics');
+		expect(summary).toContain('patch/product');
+		expect(summary).toContain('PRODUCT.txt');
+		expect(summary).toContain('Commits:');
+		expect(summary).toContain('Add patch/product');
+		expect(summary).toContain('Resolved:');
+		expect(summary).toContain('Diff base:');
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}

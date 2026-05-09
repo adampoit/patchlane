@@ -54,10 +54,10 @@ on:
         - cron: '0 10 * * *'
     workflow_dispatch:
         inputs:
-            dry_run:
-                description: 'Test without pushing changes'
+            no_push:
+                description: 'Build the sync branch locally but do not push'
                 type: boolean
-                default: true
+                default: false
 
 permissions:
     contents: write
@@ -85,7 +85,7 @@ jobs:
                       patch/product
                       patch/sync
                       patch/ci
-                  DRY_RUN: ${{ inputs.dry_run || false }}
+                  NO_PUSH: ${{ inputs.no_push || false }}
 ```
 
 ### 3. Add a CI Workflow
@@ -150,7 +150,7 @@ jobs:
 
 ### 5. Run It
 
-Trigger the sync workflow manually with `dry_run: true` first to verify your patches apply cleanly.
+Trigger the sync workflow manually with `no_push: true` first to verify your patches apply cleanly.
 
 ---
 
@@ -169,7 +169,7 @@ npx patchlane sync \
   --patch-refs="patch/product,patch/sync,patch/ci" \
   --base-branch=main \
   --sync-branch=sync/integration \
-  --dry-run
+  --no-push
 
 # Promote (after CI passes)
 npx patchlane promote \
@@ -204,7 +204,8 @@ Options:
 | `upstream_ref`         | —        | `main`             | Upstream branch when not using releases                               |
 | `release_selector`     | —        | `latest`           | `latest`, `prerelease`, regex, or blank for `upstream_ref`            |
 | `sync_branch`          | —        | `sync/integration` | Published generated branch name                                       |
-| `dry_run`              | —        | `false`            | Test patches without pushing                                          |
+| `dry_run`              | —        | `false`            | Validate patches without creating the sync branch                     |
+| `no_push`              | —        | `false`            | Build the sync branch locally but do not push                         |
 | `origin_remote_name`   | —        | `origin`           | Name of the fork remote                                               |
 | `upstream_remote_name` | —        | `upstream`         | Name of the upstream remote                                           |
 | `upstream_remote_url`  | —        | inferred           | URL of the upstream remote (inferred from owner/repo if omitted)      |
@@ -213,15 +214,15 @@ Options:
 
 When running in a GitHub Actions environment, Patchlane writes the following outputs to `GITHUB_OUTPUT`:
 
-| Output             | Description                                                           |
-| ------------------ | --------------------------------------------------------------------- |
-| `sync_branch`      | The generated branch that was built                                   |
-| `sync_sha`         | The commit SHA published to `sync_branch`                             |
-| `failed_bookmark`  | First patch that failed to apply                                      |
-| `failed_commit`    | Commit at the head of the failed patch                                |
-| `conflicted_paths` | Files with conflicts                                                  |
-| `applied_refs`     | Successfully applied patches                                          |
-| `status`           | `dry_run`, `published`, `unchanged`, `missing_patch`, or `conflicted` |
+| Output             | Description                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `sync_branch`      | The generated branch that was built                                                               |
+| `sync_sha`         | The commit SHA published to `sync_branch`                                                         |
+| `failed_bookmark`  | First patch that failed to apply                                                                  |
+| `failed_commit`    | Commit at the head of the failed patch                                                            |
+| `conflicted_paths` | Files with conflicts                                                                              |
+| `applied_refs`     | Successfully applied patches                                                                      |
+| `status`           | `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, or `invalid_patch` |
 
 ### Promote Options
 
@@ -262,7 +263,7 @@ patch_refs: |
 - **Order matters** – Put foundational patches first (e.g., `patch/ci` before `patch/product`).
 - **Store workflows on patches** – Your fork's CI and sync workflows should live on patch branches, not the promoted base branch.
 - **Treat the base branch as generated output** – Avoid direct commits on `base_branch`; put fork-owned changes on `patch/*`.
-- **Test locally first** – Use `dry_run: true` to validate before letting automation push.
+- **Test locally first** – Use `no_push: true` to validate before letting automation push.
 
 ---
 

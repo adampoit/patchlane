@@ -11,7 +11,7 @@ Treat the promoted base branch as generated output. Do not place fork-owned prod
 
 Use the bundled workflow templates in this skill as the default source of truth when adding Patchlane to a fork.
 
-- Read `assets/sync-upstream.yml` before writing the sync workflow. Mirror its `workflow_dispatch` inputs for `dry_run`, `upstream_ref`, `release_selector`, and `patch_refs` unless the fork has a concrete reason to simplify them.
+- Read `assets/sync-upstream.yml` before writing the sync workflow. Mirror its `workflow_dispatch` inputs for `no_push`, `upstream_ref`, `release_selector`, and `patch_refs` unless the fork has a concrete reason to simplify them.
 - Read `assets/fork-ci.yml` before wiring CI. Preserve the important trigger shape: normal `pull_request` coverage plus `push` on both the base branch and `sync/integration`.
 - Read `assets/promote-tested-sync.yml` before writing promotion logic. Preserve the `workflow_run` trigger on `Fork CI`, the success guard, the `sync/integration` branch check, and `EXPECTED_SYNC_SHA: ${{ github.event.workflow_run.head_sha }}`.
 - Treat the example files as templates to adapt, not just loose inspiration. If the fork already has workflows, update them toward the same invariants instead of copying blindly.
@@ -33,7 +33,7 @@ Bundled template mapping:
 - Sync workflow template: `assets/sync-upstream.yml`
 - Fork CI template: `assets/fork-ci.yml`
 - Promotion workflow template: `assets/promote-tested-sync.yml`
-- Typical env block in sync: `UPSTREAM_OWNER`, `UPSTREAM_REPO`, `BASE_BRANCH`, `UPSTREAM_REF`, `RELEASE_SELECTOR`, `SYNC_BRANCH`, `PATCH_REFS`, `DRY_RUN`
+- Typical env block in sync: `UPSTREAM_OWNER`, `UPSTREAM_REPO`, `BASE_BRANCH`, `UPSTREAM_REF`, `RELEASE_SELECTOR`, `SYNC_BRANCH`, `PATCH_REFS`, `NO_PUSH`
 - Typical env block in promote: `BASE_BRANCH`, `SYNC_BRANCH`, `EXPECTED_SYNC_SHA`
 
 Apply these checks while working:
@@ -54,4 +54,4 @@ Finish by summarizing:
 - the chosen base branch and sync branch
 - the ordered patch branch list
 - which workflow files were added or updated
-- how to trigger the first dry run
+- how to trigger the first no-push test run
