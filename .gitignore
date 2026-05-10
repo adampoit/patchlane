@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-test/
+UPCOMING_CHANGELOG.md
 
 # Added by gitignore-node convention
 logs
@@ -55,4 +56,3 @@ out/
 *.swo
 *~
 .vscode/settings.json
-

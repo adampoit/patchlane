@@ -14,6 +14,8 @@
   },
   "scripts": {
     "build": "node --experimental-strip-types ./scripts/sync-skill-assets.ts && tsc -p tsconfig.json",
+    "changelog": "node --experimental-strip-types ./scripts/changelog.ts --print",
+    "changelog:raw": "node --experimental-strip-types ./scripts/raw-changelog.ts",
     "test": "npm run build && tsc -p tsconfig.test.json && vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
