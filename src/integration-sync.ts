@@ -427,167 +427,182 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		return `### Patch diagnostics\n\n${diagnostics.map(formatPatchDiagnostic).join('\n\n')}`;
 	}
 
-	if (dryRun) {
-		log(`Validating ${patchRefs.length} patch ref(s) for ${syncBranch}`);
-		const diagnostics: PatchDiagnostic[] = [];
+	function applyAllPatches(
+		targetCwd: string,
+		isDryRun: boolean,
+	): { appliedRefs: string[]; patchDiagnostics: PatchDiagnostic[]; rebuiltSyncSha: string } {
+		const appliedRefs: string[] = [];
+		const patchDiagnostics: PatchDiagnostic[] = [];
+
 		for (const ref of patchRefs) {
 			const resolved = resolvePatchRef(ref, originRemoteName);
 			if (!resolved) {
+				const body = [
+					`- Base: \`${upstreamBase}\``,
+					`- Source: \`${sourceLabel}\``,
+					`- Failed bookmark: \`${ref}\``,
+					`- Reason: patch ref could not be resolved locally or from \`${originRemoteName}\`.`,
+				].join('\n');
+				writeOutput('failed_bookmark', ref);
+				writeOutput('failed_commit', '');
+				writeOutput('conflicted_paths', '');
+				writeOutput('applied_refs', appliedRefs.join('\n'));
+				writeOutput('sync_branch', syncBranch);
+				writeOutput('status', 'missing_patch');
+				writeSummary('## Integration rebuild failed', body);
 				fail(`Patch ref '${ref}' could not be resolved locally or from ${originRemoteName}.`);
 			}
+
 			const d = gatherPatchDiagnostics(ref, resolved);
 			validatePatch(ref, resolved, d.diffBase);
-			diagnostics.push(d);
+			patchDiagnostics.push(d);
+
+			const commitRange = `${d.diffBase}..${resolved}`;
+			const commitsToReplay = git(['rev-list', '--no-merges', '--reverse', commitRange], {
+				allowFailure: true,
+				cwd: targetCwd,
+			});
+			if (commitsToReplay.status !== 0) {
+				fail(`Failed to list commits for patch ref '${ref}'.`);
+			}
+			const commitShas = commitsToReplay.stdout.trim().split('\n').filter(Boolean);
+
+			if (!commitShas.length) {
+				log(`Skipping ${ref}; no commits to replay against ${sourceLabel}.`);
+				continue;
+			}
+
+			log(`Replaying ${commitShas.length} commit(s) from ${ref}`);
+
+			let anyCommitApplied = false;
+
+			for (const commitSha of commitShas) {
+				const subject = git(['log', '-1', '--format=%s', commitSha], { cwd: targetCwd }).stdout.trim();
+
+				const cherryPick = git(['cherry-pick', commitSha], {
+					allowFailure: true,
+					cwd: targetCwd,
+				});
+				const output = [cherryPick.stdout, cherryPick.stderr].filter(Boolean).join('\n');
+				if (output) process.stdout.write(`${output.trim()}\n`);
+
+				if (cherryPick.status !== 0) {
+					const combinedOutput = cherryPick.stdout + cherryPick.stderr;
+					if (combinedOutput.includes('The previous cherry-pick is now empty')) {
+						git(['cherry-pick', '--skip'], { allowFailure: true, cwd: targetCwd });
+						continue;
+					}
+
+					const unmerged = git(['diff', '--name-only', '--diff-filter=U'], {
+						allowFailure: true,
+						cwd: targetCwd,
+					})
+						.stdout.trim()
+						.split('\n')
+						.filter(Boolean);
+					const conflictedPaths = unmerged.length ? unmerged : parseConflictPaths(output);
+
+					const body = [
+						`- Base: \`${upstreamBase}\``,
+						`- Source: \`${sourceLabel}\``,
+						`- Failed bookmark: \`${ref}\``,
+						`- Failed commit: \`${commitSha}\``,
+						`- Failed subject: \`${subject}\``,
+					].join('\n');
+
+					const sectionParts: string[] = [];
+					if (conflictedPaths.length) {
+						sectionParts.push(`### Conflicted paths\n\n${bulletList(conflictedPaths)}`);
+					}
+					sectionParts.push(
+						`### Reproduction\n\n\`\`\`bash\ngit fetch origin ${ref}\ngit cherry-pick ${commitSha}\n\`\`\``,
+					);
+
+					writeOutput('failed_bookmark', ref);
+					writeOutput('failed_commit', commitSha);
+					writeOutput('conflicted_paths', conflictedPaths.join('\n'));
+					writeOutput('applied_refs', appliedRefs.join('\n'));
+					writeOutput('sync_branch', syncBranch);
+					writeOutput('status', 'conflicted');
+					writeSummary('## Integration rebuild failed', body, sectionParts.join('\n\n'));
+
+					if (!isDryRun) {
+						process.stderr.write(
+							`\nWARNING: The working tree contains generated patchlane output in a conflicted state.\n`,
+						);
+						process.stderr.write(
+							`Do not move patch branches or bookmarks to the failed working tree commit.\n`,
+						);
+					}
+					fail(`Failed to replay commit ${commitSha.slice(0, 7)} from ${ref}: ${subject}`);
+				}
+
+				const headSubject = git(['log', '-1', '--format=%s', 'HEAD'], { cwd: targetCwd }).stdout.trim();
+				const headBody = git(['log', '-1', '--format=%b', 'HEAD'], { cwd: targetCwd }).stdout.trim();
+				const patchBaseSha = git(['rev-parse', d.diffBase], { cwd: targetCwd }).stdout.trim();
+				const trailers = `Patch-Ref: ${ref}\nPatch-Base: ${patchBaseSha}\nOriginal-Commit: ${commitSha}`;
+				const newMessage = headBody
+					? `${headSubject}\n\n${headBody}\n\n${trailers}`
+					: `${headSubject}\n\n${trailers}`;
+				git(['commit', '--amend', '-m', newMessage], { cwd: targetCwd });
+				anyCommitApplied = true;
+			}
+
+			if (!anyCommitApplied) {
+				log(`Skipping ${ref}; patch produced no staged changes.`);
+				continue;
+			}
+
+			appliedRefs.push(ref);
 		}
 
-		writeOutput('failed_bookmark', '');
-		writeOutput('failed_commit', '');
-		writeOutput('conflicted_paths', '');
-		writeOutput('applied_refs', patchRefs.join('\n'));
-		writeOutput('sync_branch', syncBranch);
-		writeOutput('status', 'dry_run');
-		writeSummary(
-			'## Integration rebuild validated',
-			[
-				`- Base: \`${upstreamBase}\``,
-				`- Source: \`${sourceLabel}\``,
-				`- Output branch: \`${syncBranch}\``,
-				`- Promotion target: \`${baseBranch}\``,
-				'- Mode: dry run (no local changes)',
-			].join('\n'),
-			formatDiagnosticsSection(diagnostics),
-		);
-		log('Dry run enabled; no local changes applied.');
+		const rebuiltSyncSha = git(['rev-parse', 'HEAD'], { cwd: targetCwd }).stdout.trim();
+		return { appliedRefs, patchDiagnostics, rebuiltSyncSha };
+	}
+
+	if (dryRun) {
+		log(`Validating ${patchRefs.length} patch ref(s) for ${syncBranch}`);
+
+		const worktreeDir = mkdtempSync(path.join(tmpdir(), 'patchlane-dry-run-'));
+		try {
+			git(['worktree', 'add', '--detach', worktreeDir, upstreamBase]);
+			const { appliedRefs, patchDiagnostics } = applyAllPatches(worktreeDir, true);
+
+			writeOutput('failed_bookmark', '');
+			writeOutput('failed_commit', '');
+			writeOutput('conflicted_paths', '');
+			writeOutput('applied_refs', appliedRefs.join('\n'));
+			writeOutput('sync_branch', syncBranch);
+			writeOutput('status', 'dry_run');
+			writeSummary(
+				'## Integration rebuild validated',
+				[
+					`- Base: \`${upstreamBase}\``,
+					`- Source: \`${sourceLabel}\``,
+					`- Output branch: \`${syncBranch}\``,
+					`- Promotion target: \`${baseBranch}\``,
+					'- Mode: dry run (no local changes)',
+				].join('\n'),
+				formatDiagnosticsSection(patchDiagnostics),
+			);
+			log('Dry run enabled; no local changes applied.');
+		} finally {
+			git(['cherry-pick', '--abort'], { allowFailure: true, cwd: worktreeDir });
+			git(['worktree', 'remove', '-f', worktreeDir], { allowFailure: true });
+			rmSync(worktreeDir, { force: true, recursive: true });
+		}
 		return;
 	}
 
 	log(`Building ${syncBranch} from ${sourceLabel}`);
 	git(['checkout', '-B', syncBranch, upstreamBase]);
-
-	const appliedRefs: string[] = [];
-	const patchDiagnostics: PatchDiagnostic[] = [];
-
-	for (const ref of patchRefs) {
-		const resolved = resolvePatchRef(ref, originRemoteName);
-		if (!resolved) {
-			const body = [
-				`- Base: \`${upstreamBase}\``,
-				`- Source: \`${sourceLabel}\``,
-				`- Failed bookmark: \`${ref}\``,
-				`- Reason: patch ref could not be resolved locally or from \`${originRemoteName}\`.`,
-			].join('\n');
-			writeOutput('failed_bookmark', ref);
-			writeOutput('failed_commit', '');
-			writeOutput('conflicted_paths', '');
-			writeOutput('applied_refs', appliedRefs.join('\n'));
-			writeOutput('sync_branch', syncBranch);
-			writeOutput('status', 'missing_patch');
-			writeSummary('## Integration rebuild failed', body);
-			fail(`Patch ref '${ref}' could not be resolved locally or from ${originRemoteName}.`);
-		}
-
-		const d = gatherPatchDiagnostics(ref, resolved);
-		validatePatch(ref, resolved, d.diffBase);
-		patchDiagnostics.push(d);
-
-		const commitRange = `${d.diffBase}..${resolved}`;
-		const commitsToReplay = git(['rev-list', '--no-merges', '--reverse', commitRange], {
-			allowFailure: true,
-		});
-		if (commitsToReplay.status !== 0) {
-			fail(`Failed to list commits for patch ref '${ref}'.`);
-		}
-		const commitShas = commitsToReplay.stdout.trim().split('\n').filter(Boolean);
-
-		if (!commitShas.length) {
-			log(`Skipping ${ref}; no commits to replay against ${sourceLabel}.`);
-			continue;
-		}
-
-		log(`Replaying ${commitShas.length} commit(s) from ${ref}`);
-
-		let anyCommitApplied = false;
-
-		for (const commitSha of commitShas) {
-			const subject = git(['log', '-1', '--format=%s', commitSha]).stdout.trim();
-
-			const cherryPick = git(['cherry-pick', commitSha], {
-				allowFailure: true,
-			});
-			const output = [cherryPick.stdout, cherryPick.stderr].filter(Boolean).join('\n');
-			if (output) process.stdout.write(`${output.trim()}\n`);
-
-			if (cherryPick.status !== 0) {
-				const combinedOutput = cherryPick.stdout + cherryPick.stderr;
-				if (combinedOutput.includes('The previous cherry-pick is now empty')) {
-					git(['cherry-pick', '--skip'], { allowFailure: true });
-					continue;
-				}
-
-				const unmerged = git(['diff', '--name-only', '--diff-filter=U'], {
-					allowFailure: true,
-				})
-					.stdout.trim()
-					.split('\n')
-					.filter(Boolean);
-				const conflictedPaths = unmerged.length ? unmerged : parseConflictPaths(output);
-
-				const body = [
-					`- Base: \`${upstreamBase}\``,
-					`- Source: \`${sourceLabel}\``,
-					`- Failed bookmark: \`${ref}\``,
-					`- Failed commit: \`${commitSha}\``,
-					`- Failed subject: \`${subject}\``,
-				].join('\n');
-
-				const sectionParts: string[] = [];
-				if (conflictedPaths.length) {
-					sectionParts.push(`### Conflicted paths\n\n${bulletList(conflictedPaths)}`);
-				}
-				sectionParts.push(
-					`### Reproduction\n\n\`\`\`bash\ngit fetch origin ${ref}\ngit cherry-pick ${commitSha}\n\`\`\``,
-				);
-
-				writeOutput('failed_bookmark', ref);
-				writeOutput('failed_commit', commitSha);
-				writeOutput('conflicted_paths', conflictedPaths.join('\n'));
-				writeOutput('applied_refs', appliedRefs.join('\n'));
-				writeOutput('sync_branch', syncBranch);
-				writeOutput('status', 'conflicted');
-				writeSummary('## Integration rebuild failed', body, sectionParts.join('\n\n'));
-
-				process.stderr.write(
-					`\nWARNING: The working tree contains generated patchlane output in a conflicted state.\n`,
-				);
-				process.stderr.write(`Do not move patch branches or bookmarks to the failed working tree commit.\n`);
-				fail(`Failed to replay commit ${commitSha.slice(0, 7)} from ${ref}: ${subject}`);
-			}
-
-			const headSubject = git(['log', '-1', '--format=%s', 'HEAD']).stdout.trim();
-			const headBody = git(['log', '-1', '--format=%b', 'HEAD']).stdout.trim();
-			const patchBaseSha = git(['rev-parse', d.diffBase]).stdout.trim();
-			const trailers = `Patch-Ref: ${ref}\nPatch-Base: ${patchBaseSha}\nOriginal-Commit: ${commitSha}`;
-			const newMessage = headBody
-				? `${headSubject}\n\n${headBody}\n\n${trailers}`
-				: `${headSubject}\n\n${trailers}`;
-			git(['commit', '--amend', '-m', newMessage]);
-			anyCommitApplied = true;
-		}
-
-		if (!anyCommitApplied) {
-			log(`Skipping ${ref}; patch produced no staged changes.`);
-			continue;
-		}
-
-		appliedRefs.push(ref);
-	}
+	const { appliedRefs, patchDiagnostics, rebuiltSyncSha } = applyAllPatches(process.cwd(), false);
 
 	writeOutput('failed_bookmark', '');
 	writeOutput('failed_commit', '');
 	writeOutput('conflicted_paths', '');
 	writeOutput('applied_refs', appliedRefs.join('\n'));
 	writeOutput('sync_branch', syncBranch);
-	const rebuiltSyncSha = git(['rev-parse', 'HEAD']).stdout.trim();
 
 	function buildSummarySections(): string {
 		const parts: string[] = [];

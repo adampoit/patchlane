@@ -195,20 +195,20 @@ Options:
 
 ### Sync Options
 
-| Option / Env Var       | Required | Default            | Description                                                           |
-| ---------------------- | -------- | ------------------ | --------------------------------------------------------------------- |
-| `upstream_owner`       | ✅       | —                  | GitHub owner/org of the upstream repository                           |
-| `upstream_repo`        | ✅       | —                  | Upstream repository name                                              |
-| `patch_refs`           | ✅       | —                  | Comma- or newline-delimited list of patch branches (applied in order) |
-| `base_branch`          | —        | `main`             | Fork branch later promoted by the promotion workflow                  |
-| `upstream_ref`         | —        | `main`             | Upstream branch when not using releases                               |
-| `release_selector`     | —        | `latest`           | `latest`, `prerelease`, regex, or blank for `upstream_ref`            |
-| `sync_branch`          | —        | `sync/integration` | Published generated branch name                                       |
-| `dry_run`              | —        | `false`            | Validate patches without creating the sync branch                     |
-| `no_push`              | —        | `false`            | Build the sync branch locally but do not push                         |
-| `origin_remote_name`   | —        | `origin`           | Name of the fork remote                                               |
-| `upstream_remote_name` | —        | `upstream`         | Name of the upstream remote                                           |
-| `upstream_remote_url`  | —        | inferred           | URL of the upstream remote (inferred from owner/repo if omitted)      |
+| Option / Env Var       | Required | Default            | Description                                                                           |
+| ---------------------- | -------- | ------------------ | ------------------------------------------------------------------------------------- |
+| `upstream_owner`       | ✅       | —                  | GitHub owner/org of the upstream repository                                           |
+| `upstream_repo`        | ✅       | —                  | Upstream repository name                                                              |
+| `patch_refs`           | ✅       | —                  | Comma- or newline-delimited list of patch branches (applied in order)                 |
+| `base_branch`          | —        | `main`             | Fork branch later promoted by the promotion workflow                                  |
+| `upstream_ref`         | —        | `main`             | Upstream branch when not using releases                                               |
+| `release_selector`     | —        | `latest`           | `latest`, `prerelease`, regex, or blank for `upstream_ref`                            |
+| `sync_branch`          | —        | `sync/integration` | Published generated branch name                                                       |
+| `dry_run`              | —        | `false`            | Validate patches and test whether they apply cleanly without creating the sync branch |
+| `no_push`              | —        | `false`            | Build the sync branch locally but do not push                                         |
+| `origin_remote_name`   | —        | `origin`           | Name of the fork remote                                                               |
+| `upstream_remote_name` | —        | `upstream`         | Name of the upstream remote                                                           |
+| `upstream_remote_url`  | —        | inferred           | URL of the upstream remote (inferred from owner/repo if omitted)                      |
 
 ### Sync Outputs
 

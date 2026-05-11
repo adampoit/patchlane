@@ -614,6 +614,81 @@ test('integration sync CLI dry-run validates without creating local branch', () 
 	}
 });
 
+test('integration sync CLI dry-run detects apply conflicts without mutating local state', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const dryRunWork = path.join(tempRoot, 'dry-run-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		// v1.1.0 changes README.md
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		// Patch based on v1.0.0 also changes README.md -> will conflict with v1.1.0
+		createPatchBranch(forkSeed, 'patch/conflict', 'v1.0.0', 'README.md', '# Fork Conflict');
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, dryRunWork], tempRoot);
+		configureUser(dryRunWork);
+		const dryRunOut = path.join(tempRoot, 'dry-run.out');
+		const dryRunSummary = path.join(tempRoot, 'dry-run.summary');
+		const dryRunResult = runSync(
+			dryRunWork,
+			stateDir,
+			dryRunOut,
+			dryRunSummary,
+			'patch/conflict',
+			'main',
+			'latest',
+			false, // noPush
+			upstreamBare,
+			false, // allowDependentPatches
+			true, // dryRun
+		);
+
+		expect(dryRunResult.status).not.toBe(0);
+		expect(readOutput(dryRunOut, 'status')).toBe('conflicted');
+		expect(readOutput(dryRunOut, 'failed_bookmark')).toBe('patch/conflict');
+		expect(readOutput(dryRunOut, 'conflicted_paths')).toBe('README.md');
+		// The local sync/integration branch should NOT have been created
+		expect(run('git', ['rev-parse', '--verify', '--quiet', 'sync/integration'], dryRunWork).status).not.toBe(0);
+		// Local files should NOT have been modified
+		expect(readFileSync(path.join(dryRunWork, 'README.md'), 'utf8').trim()).toBe('# Upstream Project');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
 test('promote sync CLI promotes tested sync branches onto the base branch', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
 	try {
