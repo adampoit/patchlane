@@ -34,14 +34,8 @@ function commitType(subject: string) {
 	return 'Improvements';
 }
 
-function isInternal(subject: string) {
-	return (
-		/^(chore|ci|docs|test|tests|style|format|release)(\(.+\))?:/i.test(subject) ||
-		/^Bump version to /i.test(subject) ||
-		/^Bump .+ from .+ to .+\s*\(#\d+\)$/i.test(subject) ||
-		/^Add release workflow\.?$/i.test(subject) ||
-		/^Apply adampoit\/conventions\//i.test(subject)
-	);
+function isSourceChange(files: string[]) {
+	return files.some((file) => file.startsWith('src/'));
 }
 
 function commits(from: string, to: string) {
@@ -54,7 +48,7 @@ function commits(from: string, to: string) {
 			const files = git(['diff-tree', '--no-commit-id', '--name-only', '-r', hash]).split('\n').filter(Boolean);
 			return { hash: hash.slice(0, 7), subject, files };
 		})
-		.filter((commit) => !isInternal(commit.subject));
+		.filter((commit) => isSourceChange(commit.files));
 }
 
 function format(from: string, to: string, list: Commit[]) {

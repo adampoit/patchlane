@@ -2,34 +2,11 @@ name: Draft GitHub Release
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version, without a leading v. Defaults to package.json version.'
-        required: false
-        type: string
-      tag:
-        description: 'Release tag. Defaults to v<version>.'
-        required: false
-        type: string
-      from:
-        description: 'Starting ref for release notes. Defaults to latest tag.'
-        required: false
-        type: string
-      target:
-        description: 'Target ref for the release tag.'
-        required: false
-        default: main
-        type: string
-      model:
-        description: 'OpenCode model for summarization.'
-        required: false
-        default: opencode-go/deepseek-v4-flash
-        type: string
 
 permissions:
   contents: write
 
-concurrency: draft-release-${{ inputs.tag || inputs.version || github.run_id }}
+concurrency: draft-release-${{ github.ref }}
 
 jobs:
   draft-release:
@@ -51,48 +28,24 @@ jobs:
       - name: Install OpenCode
         run: npm install -g opencode-ai
 
-      - name: Resolve release inputs
+      - name: Resolve release
         id: release
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-          INPUT_TAG: ${{ inputs.tag }}
-          INPUT_FROM: ${{ inputs.from }}
-          INPUT_TARGET: ${{ inputs.target }}
         run: |
-          version="$INPUT_VERSION"
-          if [ -z "$version" ]; then
-            version="$(node -p "require('./package.json').version")"
-          fi
-
-          tag="$INPUT_TAG"
-          if [ -z "$tag" ]; then
-            tag="v$version"
-          fi
-
-          target="$INPUT_TARGET"
-          if [ -z "$target" ]; then
-            target="main"
-          fi
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          target="$(git rev-parse HEAD)"
 
           {
             printf 'version=%s\n' "$version"
             printf 'tag=%s\n' "$tag"
             printf 'target=%s\n' "$target"
-            printf 'from=%s\n' "$INPUT_FROM"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          OPENCODE_RELEASE_NOTES_MODEL: ${{ inputs.model }}
-          FROM_REF: ${{ steps.release.outputs.from }}
           TARGET_REF: ${{ steps.release.outputs.target }}
-        run: |
-          args=(--to "$TARGET_REF")
-          if [ -n "$FROM_REF" ]; then
-            args+=(--from "$FROM_REF")
-          fi
-          npm run changelog -- "${args[@]}"
+        run: npm run changelog -- --to "$TARGET_REF"
 
       - name: Create draft GitHub release
         env:

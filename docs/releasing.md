@@ -16,18 +16,16 @@ The workflow defaults to `opencode-go/deepseek-v4-flash`, a lower-cost OpenCode 
 
 ## Draft a Release
 
-Invoke the release workflow locally with the GitHub CLI:
+Invoke the release workflow locally with npm:
 
 ```bash
-gh workflow run draft-release.yml \
-  -f version=0.3.1 \
-  -f from=v0.3.0 \
-  -f target=main
+npm run release
 ```
 
-Optional inputs:
+This dispatches the GitHub Actions workflow with the GitHub CLI. The workflow reads the release version from `package.json`, creates the `v<version>` tag, compares against the latest existing tag, and drafts the release at the checked-out commit.
 
-- `tag` overrides the default `v<version>` tag.
-- `model` overrides the default OpenCode Go summarization model.
-- `from` defaults to the latest local tag discovered by the workflow checkout.
-- `target` defaults to `main`.
+You can also invoke the workflow directly with `gh`:
+
+```bash
+gh workflow run draft-release.yml
+```
