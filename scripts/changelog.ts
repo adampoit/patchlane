@@ -16,7 +16,7 @@ const { values, positionals } = parseArgs({
 		model: {
 			type: 'string',
 			short: 'm',
-			default: process.env.OPENCODE_RELEASE_NOTES_MODEL ?? 'opencode-go/deepseek-v4-flash',
+			default: process.env.OPENCODE_RELEASE_NOTES_MODEL ?? 'opencode-go/kimi-k2.6',
 		},
 		variant: { type: 'string', default: 'low' },
 		print: { type: 'boolean', default: false },
@@ -34,7 +34,7 @@ Generates UPCOMING_CHANGELOG.md by running the opencode changelog command.
 Options:
   -f, --from <ref>     Starting ref (default: latest tag, if any)
   -t, --to <ref>       Ending ref (default: HEAD)
-  -m, --model <model>   OpenCode model (default: opencode-go/deepseek-v4-flash)
+  -m, --model <model>   OpenCode model (default: opencode-go/kimi-k2.6)
       --variant <name> Thinking variant for opencode run (default: low)
       --print          Print UPCOMING_CHANGELOG.md after success
   -h, --help           Show this help message
