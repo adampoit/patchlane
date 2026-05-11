@@ -1,7 +1,7 @@
 #!/usr/bin/env node --experimental-strip-types
 
 import { spawnSync } from 'node:child_process';
-import { rmSync, readFileSync } from 'node:fs';
+import { existsSync, rmSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -16,7 +16,7 @@ const { values, positionals } = parseArgs({
 		model: {
 			type: 'string',
 			short: 'm',
-			default: process.env.OPENCODE_RELEASE_NOTES_MODEL ?? 'opencode/deepseek-v4-flash',
+			default: process.env.OPENCODE_RELEASE_NOTES_MODEL ?? 'opencode-go/deepseek-v4-flash',
 		},
 		variant: { type: 'string', default: 'low' },
 		print: { type: 'boolean', default: false },
@@ -34,7 +34,7 @@ Generates UPCOMING_CHANGELOG.md by running the opencode changelog command.
 Options:
   -f, --from <ref>     Starting ref (default: latest tag, if any)
   -t, --to <ref>       Ending ref (default: HEAD)
-  -m, --model <model>   OpenCode model (default: opencode/deepseek-v4-flash)
+  -m, --model <model>   OpenCode model (default: opencode-go/deepseek-v4-flash)
       --variant <name> Thinking variant for opencode run (default: low)
       --print          Print UPCOMING_CHANGELOG.md after success
   -h, --help           Show this help message
@@ -58,4 +58,8 @@ const result = spawnSync(
 );
 
 if (result.status !== 0) process.exit(result.status ?? 1);
+if (!existsSync(file)) {
+	console.error(`Expected ${file} to be created by the opencode changelog command.`);
+	process.exit(1);
+}
 if (values.print) process.stdout.write(readFileSync(file, 'utf8'));

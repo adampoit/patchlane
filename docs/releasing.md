@@ -12,7 +12,7 @@ To authenticate CI, create an OpenCode Go API key from the workspace keys page:
 
 To validate the key locally, run `opencode`, use `/connect`, select `OpenCode Go`, and paste the key when prompted.
 
-The workflow defaults to `opencode/deepseek-v4-flash`, a lower-cost OpenCode Go model suitable for summarizing release notes. You can list available models with `opencode models opencode` after connecting OpenCode Go.
+The workflow defaults to `opencode-go/deepseek-v4-flash`, a lower-cost OpenCode Go model suitable for summarizing release notes. You can list available models with `opencode models opencode-go` after connecting OpenCode Go.
 
 ## Draft a Release
 

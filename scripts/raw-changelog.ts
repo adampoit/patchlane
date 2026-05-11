@@ -39,6 +39,7 @@ function isInternal(subject: string) {
 		/^(chore|ci|docs|test|tests|style|format|release)(\(.+\))?:/i.test(subject) ||
 		/^Bump version to /i.test(subject) ||
 		/^Bump .+ from .+ to .+\s*\(#\d+\)$/i.test(subject) ||
+		/^Add release workflow\.?$/i.test(subject) ||
 		/^Apply adampoit\/conventions\//i.test(subject)
 	);
 }

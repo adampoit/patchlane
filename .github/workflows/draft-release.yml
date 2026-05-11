@@ -23,7 +23,7 @@ on:
       model:
         description: 'OpenCode model for summarization.'
         required: false
-        default: opencode/deepseek-v4-flash
+        default: opencode-go/deepseek-v4-flash
         type: string
 
 permissions:

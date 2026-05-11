@@ -1,5 +1,5 @@
 ---
-model: opencode/deepseek-v4-flash
+model: opencode-go/deepseek-v4-flash
 ---
 
 Create `UPCOMING_CHANGELOG.md` from the structured changelog input below.
