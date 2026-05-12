@@ -127,6 +127,7 @@ function runSync(
 	upstreamRemoteUrl: string,
 	allowDependentPatches = false,
 	dryRun = false,
+	forcePush = false,
 ) {
 	const launcherDir = mkdtempSync(path.join(tmpdir(), 'patchlane-gh-'));
 	createLauncher(launcherDir);
@@ -146,6 +147,7 @@ function runSync(
 		PATCH_REFS: patchRefs,
 		DRY_RUN: dryRun ? 'true' : 'false',
 		NO_PUSH: noPush ? 'true' : 'false',
+		FORCE_PUSH: forcePush ? 'true' : 'false',
 		UPSTREAM_REMOTE_URL: upstreamRemoteUrl,
 		ALLOW_DEPENDENT_PATCHES: allowDependentPatches ? 'true' : 'false',
 	};
@@ -351,6 +353,119 @@ test('integration sync CLI rebuilds from releases and branch refs', () => {
 		expect(readOutput(run4Out, 'conflicted_paths')).toBe('README.md');
 		expect(readOutput(run4Out, 'status')).toBe('conflicted');
 		expect(readFileSync(run4Summary, 'utf8')).toContain('README.md');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI force-pushes unchanged branch when --force-push is set', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const firstWork = path.join(tempRoot, 'first-work');
+		const secondWork = path.join(tempRoot, 'second-work');
+		const forcePushWork = path.join(tempRoot, 'force-push-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		createPatchBranch(forkSeed, 'patch/product', 'v1.1.0', 'PRODUCT.txt', 'product patch');
+
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		git(['clone', forkBare, firstWork], tempRoot);
+		configureUser(firstWork);
+		const firstOut = path.join(tempRoot, 'first.out');
+		const firstSummary = path.join(tempRoot, 'first.summary');
+		const firstRun = runSync(
+			firstWork,
+			stateDir,
+			firstOut,
+			firstSummary,
+			'patch/product',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+		);
+
+		expectSuccess(firstRun);
+		expect(readOutput(firstOut, 'status')).toBe('published');
+		const firstSha = readOutput(firstOut, 'sync_sha');
+
+		git(['clone', forkBare, secondWork], tempRoot);
+		configureUser(secondWork);
+		const secondOut = path.join(tempRoot, 'second.out');
+		const secondSummary = path.join(tempRoot, 'second.summary');
+		const secondRun = runSync(
+			secondWork,
+			stateDir,
+			secondOut,
+			secondSummary,
+			'patch/product',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+		);
+
+		expectSuccess(secondRun);
+		expect(readOutput(secondOut, 'status')).toBe('unchanged');
+		expect(readOutput(secondOut, 'sync_sha')).toBe(firstSha);
+
+		git(['clone', forkBare, forcePushWork], tempRoot);
+		configureUser(forcePushWork);
+		const forcePushOut = path.join(tempRoot, 'force-push.out');
+		const forcePushSummary = path.join(tempRoot, 'force-push.summary');
+		const forcePushRun = runSync(
+			forcePushWork,
+			stateDir,
+			forcePushOut,
+			forcePushSummary,
+			'patch/product',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+			false,
+			false,
+			true,
+		);
+
+		expectSuccess(forcePushRun);
+		expect(readOutput(forcePushOut, 'status')).toBe('published');
+		const forcePushSha = readOutput(forcePushOut, 'sync_sha');
+		git(['fetch', 'origin', 'sync/integration'], forkSeed);
+		expect(git(['rev-parse', 'refs/remotes/origin/sync/integration'], forkSeed)).toBe(forcePushSha);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}

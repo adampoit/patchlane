@@ -211,6 +211,7 @@ export type IntegrationSyncOptions = {
 	syncBranch?: string;
 	dryRun?: boolean;
 	noPush?: boolean;
+	forcePush?: boolean;
 	allowDependentPatches?: boolean;
 	originRemoteName?: string;
 	upstreamRemoteName?: string;
@@ -247,6 +248,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const syncBranch = options.syncBranch ?? 'sync/integration';
 	const dryRun = options.dryRun ?? false;
 	const noPush = options.noPush ?? false;
+	const forcePush = options.forcePush ?? false;
 	const allowDependentPatches = options.allowDependentPatches ?? false;
 	const originRemoteName = options.originRemoteName ?? 'origin';
 	const upstreamRemoteName = options.upstreamRemoteName ?? 'upstream';
@@ -637,7 +639,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		git(['rev-parse', '--verify', '--quiet', remoteSyncRef], {
 			allowFailure: true,
 		}).status === 0;
-	if (remoteSyncExists) {
+	if (remoteSyncExists && !forcePush) {
 		const rebuiltTree = git(['rev-parse', `${rebuiltSyncSha}^{tree}`]).stdout.trim();
 		const remoteSyncSha = git(['rev-parse', remoteSyncRef]).stdout.trim();
 		const remoteSyncTree = git(['rev-parse', `${remoteSyncRef}^{tree}`]).stdout.trim();
@@ -690,6 +692,7 @@ function main() {
 		syncBranch: getEnv('SYNC_BRANCH', 'sync/integration'),
 		dryRun: isTrue(getEnv('DRY_RUN', 'false')),
 		noPush: isTrue(getEnv('NO_PUSH', 'false')),
+		forcePush: isTrue(getEnv('FORCE_PUSH', 'false')),
 		allowDependentPatches: isTrue(getEnv('ALLOW_DEPENDENT_PATCHES', 'false')),
 		originRemoteName: getEnv('ORIGIN_REMOTE_NAME', 'origin'),
 		upstreamRemoteName: getEnv('UPSTREAM_REMOTE_NAME', 'upstream'),
