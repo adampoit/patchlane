@@ -1,14 +1,14 @@
 {
   "compilerOptions": {
-    "strict": true,
-    "moduleResolution": "NodeNext",
-    "noEmitOnError": true,
+    "target": "ES2022",
     "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "esModuleInterop": true,
-    "skipLibCheck": true,
     "rootDir": "src",
-    "target": "ES2022"
+    "strict": true,
+    "noEmitOnError": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true
   },
   "include": ["src/**/*.ts"]
 }
