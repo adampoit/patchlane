@@ -14,15 +14,15 @@ on:
         required: false
         default: false
       source:
-        description: Upstream source, such as release:latest or branch:main.
+        description: Override the configured source, such as release:latest or branch:main.
         type: string
         required: false
-        default: ${config.source}
+        default: ""
       patch_refs:
-        description: Comma-separated patch branches applied in order.
+        description: Override the configured comma-separated patch branches.
         type: string
         required: false
-        default: ${config.patchRefs.join(', ')}
+        default: ""
 
 permissions:
   contents: write
@@ -43,8 +43,8 @@ jobs:
       - name: Run patchlane sync
         run: npx patchlane@${packageVersion} sync
         env:
-          UPSTREAM_SOURCE: \${{ inputs.source || '${config.source}' }}
-          PATCH_REFS: \${{ inputs.patch_refs || '${config.patchRefs.join(', ')}' }}
+          UPSTREAM_SOURCE: \${{ inputs.source }}
+          PATCH_REFS: \${{ inputs.patch_refs }}
           NO_PUSH: \${{ inputs.no_push || false }}
 `;
 }
