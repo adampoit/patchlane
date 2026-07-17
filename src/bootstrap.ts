@@ -1,26 +1,14 @@
-import { spawnSync } from 'node:child_process';
 import { loadPatchlaneConfig } from './config.js';
 import { runDoctor } from './doctor.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { runPromoteSync } from './promote-sync.js';
+import { git, run } from './subprocess.js';
 
 type BootstrapOptions = {
 	publish?: boolean;
 	wait?: boolean;
 	cwd?: string;
 };
-
-function run(command: string, args: string[], cwd: string) {
-	const result = spawnSync(command, args, { cwd, encoding: 'utf8' });
-	if (result.error) throw result.error;
-	return { status: result.status ?? 1, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
-}
-
-function git(args: string[], cwd: string) {
-	const result = run('git', args, cwd);
-	if (result.status !== 0) throw new Error(result.stderr || result.stdout || `git ${args.join(' ')} failed`);
-	return result.stdout;
-}
 
 function delay(milliseconds: number) {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));

@@ -37,13 +37,16 @@ test('initializes config and pinned workflows from repository conventions', () =
 		};
 		expect(configFile.patchRefs).toEqual(['patch/sync', 'patch/ci', 'patch/product']);
 
+		const { version } = JSON.parse(
+			readFileSync(path.resolve(import.meta.dirname, '..', 'package.json'), 'utf8'),
+		) as { version: string };
 		const syncWorkflow = readFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'utf8');
 		expect(syncWorkflow).toContain('description: Override the configured source');
 		expect(syncWorkflow).toContain('UPSTREAM_SOURCE: ${{ inputs.source }}');
-		expect(syncWorkflow).toContain('npx patchlane@0.3.1 sync');
+		expect(syncWorkflow).toContain(`npx patchlane@${version} sync`);
 		const promotionWorkflow = readFileSync(path.join(workflowDir, 'promote-tested-sync.yml'), 'utf8');
 		expect(promotionWorkflow).toContain('workflows: ["Existing CI"]');
-		expect(promotionWorkflow).toContain('npx patchlane@0.3.1 promote');
+		expect(promotionWorkflow).toContain(`npx patchlane@${version} promote`);
 
 		expect(() => initializePatchlane({ cwd: tempRoot })).toThrow(/already exists/);
 	} finally {
