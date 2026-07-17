@@ -1,9 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { getPackageVersion } from './package-version.js';
 
 const DEFAULT_INSTALL_DIR = '.agents/skills';
-const DEFAULT_SKILLS_REF = 'main';
-const DEFAULT_SKILLS_BASE_URL = 'https://raw.githubusercontent.com/adampoit/patchlane/main/skills';
 const INSTALL_STATE_FILE = '.patchlane-install.json';
 
 type SkillManifest = {
@@ -55,7 +54,6 @@ function normalizeBaseUrl(value: string) {
 function resolveSourceBaseUrl(ref: string) {
 	const overridden = env('PATCHLANE_SKILLS_BASE_URL');
 	if (overridden) return normalizeBaseUrl(overridden);
-	if (ref === DEFAULT_SKILLS_REF) return DEFAULT_SKILLS_BASE_URL;
 	return normalizeBaseUrl(`https://raw.githubusercontent.com/adampoit/patchlane/${ref}/skills`);
 }
 
@@ -193,7 +191,7 @@ function writeSkillFiles(installDir: string, skill: FetchedSkill) {
 
 export async function installPatchlaneAgents(options: InstallPatchlaneAgentsOptions = {}) {
 	const installDir = path.resolve(process.cwd(), options.installDir ?? DEFAULT_INSTALL_DIR);
-	const ref = options.ref ?? DEFAULT_SKILLS_REF;
+	const ref = options.ref ?? `v${getPackageVersion()}`;
 	const sourceBaseUrl = resolveSourceBaseUrl(ref);
 
 	log(`Fetching Patchlane agent skills from ${sourceBaseUrl}`);

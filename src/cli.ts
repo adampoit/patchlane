@@ -6,6 +6,7 @@ import { loadPatchlaneConfig } from './config.js';
 import { runDoctor } from './doctor.js';
 import { initializePatchlane } from './init.js';
 import { runIntegrationSync } from './integration-sync.js';
+import { getPackageVersion } from './package-version.js';
 import { runPromoteSync } from './promote-sync.js';
 import { parseUpstreamSource } from './upstream-source.js';
 
@@ -30,7 +31,7 @@ cli.command('agents', 'Install or update Patchlane agent skills')
 		default: env('PATCHLANE_AGENTS_DIR', '.agents/skills'),
 	})
 	.option('--ref <git-ref>', 'Patchlane git ref to pull skills from', {
-		default: env('PATCHLANE_SKILLS_REF', 'main'),
+		default: env('PATCHLANE_SKILLS_REF', `v${getPackageVersion()}`),
 	})
 	.action((args) => {
 		void installPatchlaneAgents({
