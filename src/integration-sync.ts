@@ -316,6 +316,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		diffBase: string;
 		commitSubjects: string[];
 		changedFiles: string[];
+		upstreamCommits: string[];
 		warnings: string[];
 	};
 
@@ -361,6 +362,13 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			.split('\n')
 			.filter(Boolean);
 		const commitSubjects = commitShas.map((sha) => git(['log', '-1', '--format=%s', sha]).stdout.trim());
+		const upstreamCommits = commitShas.filter((sha) => {
+			const containingRefs = git(
+				['for-each-ref', `--contains=${sha}`, '--format=%(refname)', `refs/remotes/${upstreamRemoteName}`],
+				{ allowFailure: true },
+			).stdout.trim();
+			return Boolean(containingRefs);
+		});
 		const changedFiles = git(['diff', '--name-only', `${diffBase}...${resolved}`], {
 			allowFailure: true,
 		})
@@ -376,10 +384,36 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			warnings.push('Appears to be based on sync branch output');
 		}
 
-		return { ref, resolvedSha, mergeBase, diffBase, commitSubjects, changedFiles, warnings };
+		return { ref, resolvedSha, mergeBase, diffBase, commitSubjects, changedFiles, upstreamCommits, warnings };
 	}
 
-	function validatePatch(ref: string, resolved: string, diffBase: string) {
+	function validatePatch(diagnostic: PatchDiagnostic, resolved: string) {
+		const { ref, diffBase, upstreamCommits } = diagnostic;
+		if (upstreamCommits.length) {
+			const failedCommit = upstreamCommits[0]!;
+			const failedSubject = git(['log', '-1', '--format=%s', failedCommit]).stdout.trim();
+			const reason = `Patch ref '${ref}' includes ${upstreamCommits.length} upstream commit(s) that are not part of ${sourceLabel}.`;
+			const body = [
+				`- Base: \`${upstreamBase}\``,
+				`- Source: \`${sourceLabel}\``,
+				`- Failed bookmark: \`${ref}\``,
+				`- First unexpected upstream commit: \`${failedCommit.slice(0, 7)} ${failedSubject}\``,
+				`- Reason: ${reason}`,
+			].join('\n');
+			writeOutput('failed_bookmark', ref);
+			writeOutput('failed_commit', failedCommit);
+			writeOutput('conflicted_paths', '');
+			writeOutput('applied_refs', '');
+			writeOutput('sync_branch', syncBranch);
+			writeOutput('status', 'invalid_patch_base');
+			writeSummary(
+				'## Integration rebuild failed',
+				body,
+				`Recreate \`${ref}\` from ${sourceLabel} so it contains only fork-owned commits.`,
+			);
+			fail(`${reason} Recreate the patch branch from ${sourceLabel}.`);
+		}
+
 		if (!allowDependentPatches) {
 			const generated = hasGeneratedAncestry(resolved, diffBase);
 			const basedOnSync = isBasedOnSyncBranch(resolved, remoteSyncRef);
@@ -463,7 +497,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			}
 
 			const d = gatherPatchDiagnostics(ref, resolved);
-			validatePatch(ref, resolved, d.diffBase);
+			validatePatch(d, resolved);
 			patchDiagnostics.push(d);
 
 			const commitRange = `${d.diffBase}..${resolved}`;
