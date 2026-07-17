@@ -2,6 +2,8 @@
 
 This walkthrough configures an existing GitHub fork. You need Node.js 22+, `git`, and an authenticated `gh` CLI.
 
+Already using an earlier Patchlane workflow? Follow the [0.4 migration guide](migrating-to-0.4.md) instead.
+
 ## 1. Choose the upstream source
 
 Add the upstream remote if needed:
