@@ -26,7 +26,7 @@ function configureUser(repo: string) {
 	git(['config', 'user.email', 'patchlane@example.test'], repo);
 }
 
-test('sync --no-push does not publish the generated branch', () => {
+test('sync skip-push flags do not publish the generated branch', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-cli-'));
 	try {
 		const upstreamBare = path.join(tempRoot, 'upstream.git');
@@ -79,10 +79,20 @@ test('sync --no-push does not publish the generated branch', () => {
 			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
 		);
 
-		const result = run('node', [cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--no-push'], forkWork);
+		const result = run('node', [cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--skip-push'], forkWork);
 
 		expect(result.status, [result.stderr, result.stdout].filter(Boolean).join('\n')).toBe(0);
 		expect(result.stdout).toContain('No-push enabled');
+		expect(
+			run('git', ['show-ref', '--verify', '--quiet', 'refs/heads/sync/integration'], forkBare).status,
+		).not.toBe(0);
+
+		const legacyNoPush = run(
+			'node',
+			[cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--no-push'],
+			forkWork,
+		);
+		expect(legacyNoPush.status, [legacyNoPush.stderr, legacyNoPush.stdout].filter(Boolean).join('\n')).toBe(0);
 		expect(
 			run('git', ['show-ref', '--verify', '--quiet', 'refs/heads/sync/integration'], forkBare).status,
 		).not.toBe(0);
