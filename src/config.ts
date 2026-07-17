@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { parse } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { parseUpstreamSource } from './upstream-source.js';
 
 export const PATCHLANE_CONFIG_FILE = '.patchlane.yml';
@@ -70,6 +70,18 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 		patchRefs,
 		ciWorkflow: typeof ciWorkflow === 'string' ? ciWorkflow.trim() : undefined,
 	};
+}
+
+export function serializePatchlaneConfig(config: PatchlaneConfig) {
+	return stringify({
+		version: 1,
+		upstream: `${config.upstreamOwner}/${config.upstreamRepo}`,
+		source: config.source,
+		baseBranch: config.baseBranch,
+		syncBranch: config.syncBranch,
+		patchRefs: config.patchRefs,
+		...(config.ciWorkflow ? { ciWorkflow: config.ciWorkflow } : {}),
+	});
 }
 
 export function loadPatchlaneConfig(cwd = process.cwd(), configPath?: string): PatchlaneConfig | undefined {

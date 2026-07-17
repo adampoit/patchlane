@@ -2,6 +2,7 @@
 import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
 import { loadPatchlaneConfig } from './config.js';
+import { initializePatchlane } from './init.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { runPromoteSync } from './promote-sync.js';
 import { parseUpstreamSource } from './upstream-source.js';
@@ -36,6 +37,31 @@ cli.command('agents', 'Install or update Patchlane agent skills')
 			process.stderr.write(`${message}\n`);
 			process.exit(1);
 		});
+	});
+
+cli.command('init', 'Create Patchlane config and workflow files')
+	.option('--upstream <owner/repo>', 'Upstream GitHub repository; inferred from the upstream remote')
+	.option('--source <source>', 'Upstream source', { default: 'release:latest' })
+	.option('--patch-refs <refs>', 'Comma-separated patch branches', { default: 'patch/sync,patch/ci' })
+	.option('--base-branch <branch>', 'Fork branch promoted later', { default: 'main' })
+	.option('--sync-branch <branch>', 'Published generated branch name', { default: 'sync/integration' })
+	.option('--ci-workflow <name>', 'Existing CI workflow name used by workflow_run')
+	.option('--force', 'Replace existing Patchlane config and workflow files')
+	.action((args) => {
+		try {
+			initializePatchlane({
+				upstream: args.upstream,
+				source: args.source,
+				patchRefs: args.patchRefs,
+				baseBranch: args.baseBranch,
+				syncBranch: args.syncBranch,
+				ciWorkflow: args.ciWorkflow,
+				force: args.force === true,
+			});
+		} catch (error) {
+			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+			process.exit(1);
+		}
 	});
 
 cli.command('sync', 'Rebuild integration branch from upstream and patches')
