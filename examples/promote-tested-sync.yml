@@ -25,7 +25,7 @@ jobs:
           node-version: '22'
 
       - name: Run patchlane promote
-        run: npx patchlane@0.3.1 promote
+        run: npx patchlane@0.4.0 promote
         env:
           BASE_BRANCH: main
           SYNC_BRANCH: sync/integration

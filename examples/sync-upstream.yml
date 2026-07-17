@@ -38,7 +38,7 @@ jobs:
           node-version: '22'
 
       - name: Run patchlane sync
-        run: npx patchlane@0.3.1 sync
+        run: npx patchlane@0.4.0 sync
         env:
           UPSTREAM_SOURCE: ${{ inputs.source }}
           PATCH_REFS: ${{ inputs.patch_refs }}

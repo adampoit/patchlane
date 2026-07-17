@@ -63,7 +63,7 @@ function listPrs(stateDir: string, argv: string[]) {
 	let base = '';
 	let jq = '';
 
-	for (let i = 0; i < argv.length; ) {
+	for (let i = 0; i < argv.length;) {
 		const arg = argv[i];
 		if (arg === '--repo' || arg === '--json') {
 			i += 2;
@@ -114,7 +114,7 @@ function editPr(stateDir: string, argv: string[]) {
 	const pr = prs.find((item) => item.number === number);
 	if (!pr) fail(`PR #${number} was not found`);
 
-	for (let i = 0; i < argv.length; ) {
+	for (let i = 0; i < argv.length;) {
 		const arg = argv[i];
 		if (arg === '--repo') {
 			i += 2;
@@ -151,7 +151,7 @@ function createPr(stateDir: string, argv: string[]) {
 	let bodyFile = '';
 	const labels: string[] = [];
 
-	for (let i = 0; i < argv.length; ) {
+	for (let i = 0; i < argv.length;) {
 		const arg = argv[i];
 		if (arg === '--repo') {
 			i += 2;
@@ -216,7 +216,7 @@ function viewPr(stateDir: string, argv: string[]) {
 	if (!pr) fail(`PR #${number} was not found`);
 
 	let jq = '';
-	for (let i = 0; i < argv.length; ) {
+	for (let i = 0; i < argv.length;) {
 		const arg = argv[i];
 		if (arg === '--repo' || arg === '--json') {
 			i += 2;
@@ -239,7 +239,7 @@ function mergePr(stateDir: string, argv: string[]) {
 	const pr = prs.find((item) => item.number === number);
 	if (!pr) fail(`PR #${number} was not found`);
 
-	for (let i = 0; i < argv.length; ) {
+	for (let i = 0; i < argv.length;) {
 		const arg = argv[i];
 		if (arg === '--repo') {
 			i += 2;
@@ -268,7 +268,7 @@ function closePr(stateDir: string, argv: string[]) {
 	const pr = prs.find((item) => item.number === number);
 	if (!pr) fail(`PR #${number} was not found`);
 
-	for (let i = 0; i < argv.length; ) {
+	for (let i = 0; i < argv.length;) {
 		const arg = argv[i];
 		if (arg === '--repo') {
 			i += 2;
