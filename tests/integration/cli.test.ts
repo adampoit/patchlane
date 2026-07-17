@@ -53,21 +53,21 @@ test('sync --no-push does not publish the generated branch', () => {
 		git(['add', 'PRODUCT.md'], forkWork);
 		git(['commit', '-m', 'Add product patch'], forkWork);
 		git(['push', 'origin', 'patch/product'], forkWork);
-
-		const result = run(
-			'node',
+		writeFileSync(
+			path.join(forkWork, '.patchlane.yml'),
 			[
-				cliPath,
-				'sync',
-				'--upstream-owner=example',
-				'--upstream-repo=upstream',
-				'--patch-refs=patch/product',
-				'--upstream-ref=main',
-				`--upstream-remote-url=${upstreamBare}`,
-				'--no-push',
-			],
-			forkWork,
+				'version: 1',
+				'upstream: example/upstream',
+				'source: branch:main',
+				'baseBranch: main',
+				'syncBranch: sync/integration',
+				'patchRefs:',
+				'  - patch/product',
+				'',
+			].join('\n'),
 		);
+
+		const result = run('node', [cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--no-push'], forkWork);
 
 		expect(result.status, [result.stderr, result.stdout].filter(Boolean).join('\n')).toBe(0);
 		expect(result.stdout).toContain('No-push enabled');

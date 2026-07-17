@@ -1,11 +1,20 @@
 #!/usr/bin/env node
 import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
+import { loadPatchlaneConfig } from './config.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { runPromoteSync } from './promote-sync.js';
 import { parseUpstreamSource } from './upstream-source.js';
 
 const cli = cac('patchlane');
+
+let config: ReturnType<typeof loadPatchlaneConfig>;
+try {
+	config = loadPatchlaneConfig();
+} catch (error) {
+	process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+	process.exit(1);
+}
 
 function env(name: string, fallback?: string) {
 	return process.env[name] || fallback;
@@ -31,19 +40,19 @@ cli.command('agents', 'Install or update Patchlane agent skills')
 
 cli.command('sync', 'Rebuild integration branch from upstream and patches')
 	.option('--upstream-owner <owner>', 'GitHub owner/org of the upstream repository', {
-		default: env('UPSTREAM_OWNER'),
+		default: env('UPSTREAM_OWNER', config?.upstreamOwner),
 	})
 	.option('--upstream-repo <repo>', 'Upstream repository name', {
-		default: env('UPSTREAM_REPO'),
+		default: env('UPSTREAM_REPO', config?.upstreamRepo),
 	})
 	.option('--patch-refs <refs>', 'Comma- or newline-delimited patch branches', {
-		default: env('PATCH_REFS'),
+		default: env('PATCH_REFS', config?.patchRefs.join(',')),
 	})
 	.option('--base-branch <branch>', 'Fork branch promoted later', {
-		default: env('BASE_BRANCH', 'main'),
+		default: env('BASE_BRANCH', config?.baseBranch ?? 'main'),
 	})
 	.option('--source <source>', 'Upstream source: release:latest, release:<regex>, or branch:<ref>', {
-		default: env('UPSTREAM_SOURCE'),
+		default: env('UPSTREAM_SOURCE', config?.source),
 	})
 	.option('--upstream-ref <ref>', 'Legacy branch source; prefer --source=branch:<ref>', {
 		default: env('UPSTREAM_REF'),
@@ -52,7 +61,7 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 		default: env('RELEASE_SELECTOR'),
 	})
 	.option('--sync-branch <branch>', 'Published generated branch name', {
-		default: env('SYNC_BRANCH', 'sync/integration'),
+		default: env('SYNC_BRANCH', config?.syncBranch ?? 'sync/integration'),
 	})
 	.option('--dry-run', 'Validate patches without creating the sync branch')
 	.option('--no-push', 'Build the sync branch locally but do not push')
@@ -123,10 +132,10 @@ cli.command('promote', 'Promote tested sync branch onto base branch')
 		default: env('EXPECTED_SYNC_SHA'),
 	})
 	.option('--base-branch <branch>', 'Fork branch to promote to', {
-		default: env('BASE_BRANCH', 'main'),
+		default: env('BASE_BRANCH', config?.baseBranch ?? 'main'),
 	})
 	.option('--sync-branch <branch>', 'Generated sync branch that passed CI', {
-		default: env('SYNC_BRANCH', 'sync/integration'),
+		default: env('SYNC_BRANCH', config?.syncBranch ?? 'sync/integration'),
 	})
 	.option('--origin-remote-name <name>', 'Name of the origin remote', {
 		default: env('ORIGIN_REMOTE_NAME', 'origin'),
