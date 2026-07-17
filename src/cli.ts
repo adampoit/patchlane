@@ -2,6 +2,7 @@
 import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
 import { loadPatchlaneConfig } from './config.js';
+import { runDoctor } from './doctor.js';
 import { initializePatchlane } from './init.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { runPromoteSync } from './promote-sync.js';
@@ -10,11 +11,13 @@ import { parseUpstreamSource } from './upstream-source.js';
 const cli = cac('patchlane');
 
 let config: ReturnType<typeof loadPatchlaneConfig>;
-try {
-	config = loadPatchlaneConfig();
-} catch (error) {
-	process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-	process.exit(1);
+if (['sync', 'promote'].includes(process.argv[2] ?? '')) {
+	try {
+		config = loadPatchlaneConfig();
+	} catch (error) {
+		process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+		process.exit(1);
+	}
 }
 
 function env(name: string, fallback?: string) {
@@ -62,6 +65,13 @@ cli.command('init', 'Create Patchlane config and workflow files')
 			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
 			process.exit(1);
 		}
+	});
+
+cli.command('doctor', 'Check Patchlane configuration without changing repository state')
+	.option('--json', 'Print a machine-readable report')
+	.action((args) => {
+		const report = runDoctor({ json: args.json === true });
+		if (!report.ok) process.exitCode = 1;
 	});
 
 cli.command('sync', 'Rebuild integration branch from upstream and patches')
