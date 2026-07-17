@@ -4,11 +4,21 @@
 
 Patchlane rebuilds an integration branch from an upstream release or branch, reapplies focused patch branches, runs your existing CI, and promotes the exact tested commit.
 
-## Quick Start
+## Quick Start with an Agent
 
-`patchlane init` generates the configuration and workflows, `patchlane doctor` verifies the complete patch stack, and `patchlane bootstrap` performs the first tested promotion.
+From a clone of your GitHub fork:
 
-Follow the short [manual setup walkthrough](docs/manual-setup.md) to create the independently based patch branches and run those commands safely.
+```bash
+npx patchlane agents
+```
+
+Then ask your coding agent:
+
+> Use the `patchlane-fork-setup` skill to configure this fork. Track `OWNER/REPO` using the latest stable release. Show me the plan before pushing or rewriting branches, then validate and bootstrap it.
+
+The skill inspects the fork, asks you to confirm the upstream source, creates independently based patch branches, adapts the existing CI workflow, and performs the first tested promotion.
+
+Prefer to do it yourself? Follow the short [manual setup walkthrough](docs/manual-setup.md).
 
 ## How It Works
 
@@ -73,7 +83,7 @@ npx patchlane sync --no-push
 # Promote an exact tested SHA
 npx patchlane promote --expected-sync-sha=<sha>
 
-# Install Patchlane's optional agent skills
+# Install agent skills matching the installed CLI version
 npx patchlane agents
 ```
 
