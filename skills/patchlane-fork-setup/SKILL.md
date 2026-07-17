@@ -1,6 +1,6 @@
 ---
 name: patchlane-fork-setup
-description: Set up a GitHub fork to use Patchlane for upstream sync automation. Use when a repository is adopting Patchlane for the first time and the agent needs to verify remotes, choose an upstream source, create patch branches, add workflows, or bootstrap the first tested sync.
+description: Set up or migrate a GitHub fork to use Patchlane upstream sync automation. Use when a repository is adopting Patchlane, upgrading legacy workflow configuration, choosing an upstream source, creating patch branches, adding workflows, or bootstrapping the first tested sync.
 ---
 
 # Patchlane Fork Setup
@@ -35,6 +35,17 @@ Use the bundled assets as invariants when adapting workflows:
 - `assets/sync-upstream.yml` exposes safe workflow-dispatch overrides and runs sync with write permission.
 - `assets/fork-ci.yml` demonstrates the required branch triggers.
 - `assets/promote-tested-sync.yml` promotes only a successful sync-branch `workflow_run` and passes its exact `head_sha`.
+
+## Migrate an existing Patchlane fork
+
+If Patchlane workflows or patch branches already exist, migrate incrementally instead of treating the repository as a new installation.
+
+1. Read the existing workflow environment and map `UPSTREAM_OWNER`, `UPSTREAM_REPO`, `RELEASE_SELECTOR` or `UPSTREAM_REF`, `BASE_BRANCH`, `SYNC_BRANCH`, and `PATCH_REFS` into `.patchlane.yml`.
+2. Preserve the configured source behavior, branch names, patch order, CI workflow name, schedule, and repository-specific workflow changes unless the user approves changing them.
+3. Add the config and adapted workflows to the existing `patch/sync` branch. Do not use `patchlane init --force` unless replacing those workflows is intentional.
+4. Run `doctor` and `sync --dry-run`, then show the migration plan before pushing rewritten patch branches.
+5. If sync and promotion workflows are already active on the generated base, roll the migration forward through the existing tested sync flow. Use initial bootstrap only when the promotion workflow is absent from the base.
+6. Follow the [Patchlane 0.4 migration guide](https://github.com/adampoit/patchlane/blob/v0.4.0/docs/migrating-to-0.4.md) for the full rollout sequence.
 
 ## Validate and bootstrap
 
