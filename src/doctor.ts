@@ -100,7 +100,7 @@ function resolveSource(config: PatchlaneConfig, cwd: string, checks: DoctorCheck
 	return { label: `release ${tag}`, sha };
 }
 
-function workflowFiles(config: PatchlaneConfig, cwd: string) {
+function workflowFiles(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string) {
 	const contents = new Map<string, string>();
 	const workflowDir = path.join(cwd, '.github', 'workflows');
 	if (existsSync(workflowDir)) {
@@ -110,10 +110,26 @@ function workflowFiles(config: PatchlaneConfig, cwd: string) {
 	}
 
 	for (const patchRef of config.patchRefs) {
-		const tree = git(['ls-tree', '-r', '--name-only', patchRef, '.github/workflows'], cwd);
-		if (tree.status !== 0) continue;
-		for (const relativePath of tree.stdout.split(/\r?\n/).filter((entry) => /\.ya?ml$/.test(entry))) {
+		const mergeBase = sourceSha ? git(['merge-base', sourceSha, patchRef], cwd) : undefined;
+		if (!mergeBase || mergeBase.status !== 0 || !mergeBase.stdout) continue;
+
+		const changes = git(
+			['diff', '--name-status', '--no-renames', mergeBase.stdout, patchRef, '--', '.github/workflows'],
+			cwd,
+		);
+		if (changes.status !== 0) continue;
+		for (const change of changes.stdout.split(/\r?\n/).filter(Boolean)) {
+			const separator = change.indexOf('\t');
+			if (separator === -1) continue;
+			const status = change.slice(0, separator);
+			const relativePath = change.slice(separator + 1);
+			if (!/\.ya?ml$/.test(relativePath)) continue;
+
 			const file = path.basename(relativePath);
+			if (status === 'D') {
+				contents.delete(file);
+				continue;
+			}
 			const content = git(['show', `${patchRef}:${relativePath}`], cwd);
 			if (content.status === 0) contents.set(file, `${content.stdout}\n`);
 		}
@@ -159,8 +175,8 @@ function hasWriteContents(workflow: Record<string, unknown>) {
 	);
 }
 
-function inspectWorkflows(config: PatchlaneConfig, cwd: string, checks: DoctorCheck[]) {
-	const files = workflowFiles(config, cwd);
+function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
+	const files = workflowFiles(config, sourceSha, cwd);
 	const parsed = files.map((file) => ({ ...file, workflow: readWorkflow(file.content) }));
 	const sync = parsed.find((file) => file.file === 'sync-upstream.yml');
 	const promotion = parsed.find((file) => file.file === 'promote-tested-sync.yml');
@@ -269,7 +285,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 	if (resolved)
 		checks.push({ severity: 'info', message: `Resolved ${config.source} to ${resolved.label} @ ${resolved.sha}.` });
 	inspectPatchRefs(config, resolved?.sha, cwd, checks);
-	inspectWorkflows(config, cwd, checks);
+	inspectWorkflows(config, resolved?.sha, cwd, checks);
 	inspectBootstrap(config, cwd, checks);
 
 	return printReport(

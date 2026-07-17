@@ -16,6 +16,83 @@ function configureUser(repo: string) {
 	git(['config', 'user.email', 'patchlane@example.test'], repo);
 }
 
+test('composes workflow changes from independent patch branches in order', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-doctor-composed-'));
+	try {
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const forkWork = path.join(tempRoot, 'fork-work');
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		const upstreamWorkflowDir = path.join(upstreamWork, '.github', 'workflows');
+		mkdirSync(upstreamWorkflowDir, { recursive: true });
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream\n');
+		writeFileSync(
+			path.join(upstreamWorkflowDir, 'ci.yml'),
+			'name: Existing CI\non:\n  push:\n    branches: [feature]\n',
+		);
+		git(['add', '.'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkWork], tempRoot);
+		configureUser(forkWork);
+		git(['remote', 'rename', 'origin', 'upstream'], forkWork);
+		git(['remote', 'add', 'origin', forkBare], forkWork);
+		git(['push', 'origin', 'main'], forkWork);
+
+		git(['switch', '-c', 'patch/sync', 'upstream/main'], forkWork);
+		const workflowDir = path.join(forkWork, '.github', 'workflows');
+		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'name: Sync\npermissions:\n  contents: write\n');
+		writeFileSync(
+			path.join(workflowDir, 'promote-tested-sync.yml'),
+			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
+		);
+		git(['add', '.github/workflows'], forkWork);
+		git(['commit', '-m', 'Add sync workflows'], forkWork);
+		git(['push', 'origin', 'patch/sync'], forkWork);
+
+		git(['switch', '-c', 'patch/ci', 'upstream/main'], forkWork);
+		writeFileSync(
+			path.join(workflowDir, 'ci.yml'),
+			'name: Existing CI\non:\n  push:\n    branches: [main, sync/integration]\n',
+		);
+		git(['add', '.github/workflows/ci.yml'], forkWork);
+		git(['commit', '-m', 'Run CI on integration branches'], forkWork);
+		git(['push', 'origin', 'patch/ci'], forkWork);
+
+		git(['switch', '-c', 'patch/product', 'upstream/main'], forkWork);
+		writeFileSync(path.join(forkWork, 'PRODUCT.md'), 'Product patch\n');
+		git(['add', 'PRODUCT.md'], forkWork);
+		git(['commit', '-m', 'Add product patch'], forkWork);
+		git(['push', 'origin', 'patch/product'], forkWork);
+
+		git(['switch', 'patch/sync'], forkWork);
+		writeFileSync(
+			path.join(forkWork, '.patchlane.yml'),
+			[
+				'version: 1',
+				'upstream: example/upstream',
+				'source: branch:main',
+				'patchRefs: [patch/sync, patch/ci, patch/product]',
+				'ciWorkflow: Existing CI',
+				'',
+			].join('\n'),
+		);
+
+		const report = runDoctor({ cwd: forkWork, json: true });
+		expect(report.ok).toBe(true);
+		expect(report.checks).not.toContainEqual(
+			expect.objectContaining({ message: expect.stringContaining('must run on pushes') }),
+		);
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
 test('reports a ready configuration and required bootstrap', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-doctor-'));
 	try {
