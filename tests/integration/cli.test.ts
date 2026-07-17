@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -7,8 +7,8 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const cliPath = path.join(repoRoot, 'dist', 'cli.js');
 
-function run(command: string, args: string[], cwd: string) {
-	const result = spawnSync(command, args, { cwd, encoding: 'utf8' });
+function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env) {
+	const result = spawnSync(command, args, { cwd, env, encoding: 'utf8' });
 	if (result.error) throw result.error;
 	return result;
 }
@@ -26,7 +26,7 @@ function configureUser(repo: string) {
 	git(['config', 'user.email', 'patchlane@example.test'], repo);
 }
 
-test('sync --no-push does not publish the generated branch', () => {
+test('sync skip-push flags do not publish the generated branch', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-cli-'));
 	try {
 		const upstreamBare = path.join(tempRoot, 'upstream.git');
@@ -53,24 +53,56 @@ test('sync --no-push does not publish the generated branch', () => {
 		git(['add', 'PRODUCT.md'], forkWork);
 		git(['commit', '-m', 'Add product patch'], forkWork);
 		git(['push', 'origin', 'patch/product'], forkWork);
-
-		const result = run(
-			'node',
+		writeFileSync(
+			path.join(forkWork, '.patchlane.yml'),
 			[
-				cliPath,
-				'sync',
-				'--upstream-owner=example',
-				'--upstream-repo=upstream',
-				'--patch-refs=patch/product',
-				'--upstream-ref=main',
-				`--upstream-remote-url=${upstreamBare}`,
-				'--no-push',
-			],
-			forkWork,
+				'version: 1',
+				'upstream: example/upstream',
+				'source: branch:main',
+				'baseBranch: main',
+				'syncBranch: sync/integration',
+				'patchRefs:',
+				'  - patch/product',
+				'ciWorkflow: Existing CI',
+				'',
+			].join('\n'),
 		);
+		const workflowDir = path.join(forkWork, '.github', 'workflows');
+		mkdirSync(workflowDir, { recursive: true });
+		writeFileSync(
+			path.join(workflowDir, 'ci.yml'),
+			'name: Existing CI\non:\n  push:\n    branches: [main, sync/integration]\n',
+		);
+		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'name: Sync\npermissions:\n  contents: write\n');
+		writeFileSync(
+			path.join(workflowDir, 'promote-tested-sync.yml'),
+			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
+		);
+
+		const result = run('node', [cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--skip-push'], forkWork);
 
 		expect(result.status, [result.stderr, result.stdout].filter(Boolean).join('\n')).toBe(0);
 		expect(result.stdout).toContain('No-push enabled');
+		expect(
+			run('git', ['show-ref', '--verify', '--quiet', 'refs/heads/sync/integration'], forkBare).status,
+		).not.toBe(0);
+
+		const legacyNoPush = run(
+			'node',
+			[cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--no-push'],
+			forkWork,
+		);
+		expect(legacyNoPush.status, [legacyNoPush.stderr, legacyNoPush.stdout].filter(Boolean).join('\n')).toBe(0);
+		expect(
+			run('git', ['show-ref', '--verify', '--quiet', 'refs/heads/sync/integration'], forkBare).status,
+		).not.toBe(0);
+
+		const bootstrap = run('node', [cliPath, 'bootstrap'], forkWork, {
+			...process.env,
+			UPSTREAM_REMOTE_URL: upstreamBare,
+		});
+		expect(bootstrap.status, [bootstrap.stderr, bootstrap.stdout].filter(Boolean).join('\n')).toBe(0);
+		expect(bootstrap.stdout).toContain('Bootstrap validation passed');
 		expect(
 			run('git', ['show-ref', '--verify', '--quiet', 'refs/heads/sync/integration'], forkBare).status,
 		).not.toBe(0);

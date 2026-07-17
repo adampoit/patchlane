@@ -6,25 +6,20 @@ on:
   workflow_dispatch:
     inputs:
       no_push:
-        description: Build the sync branch locally but do not push.
+        description: Build the sync branch without publishing it.
         type: boolean
         required: false
         default: false
-      upstream_ref:
-        description: Upstream branch ref to rebuild from when release_selector is blank.
+      source:
+        description: Override the configured source, such as release:latest or branch:main.
         type: string
         required: false
-        default: main
-      release_selector:
-        description: Use `latest`, `prerelease`, or a regex for upstream tags. Leave blank to use upstream_ref.
-        type: string
-        required: false
-        default: latest
+        default: ''
       patch_refs:
-        description: Comma-separated patch branches applied in order.
+        description: Override the configured comma-separated patch branches.
         type: string
         required: false
-        default: patch/product, patch/sync, patch/ci
+        default: ''
 
 permissions:
   contents: write
@@ -43,13 +38,8 @@ jobs:
           node-version: '22'
 
       - name: Run patchlane sync
-        run: npx patchlane@latest sync
+        run: npx patchlane@0.3.1 sync
         env:
-          UPSTREAM_OWNER: upstream-org
-          UPSTREAM_REPO: upstream-repo
-          BASE_BRANCH: main
-          UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
-          RELEASE_SELECTOR: ${{ inputs.release_selector || 'latest' }}
-          SYNC_BRANCH: sync/integration
-          PATCH_REFS: ${{ inputs.patch_refs || 'patch/product, patch/sync, patch/ci' }}
+          UPSTREAM_SOURCE: ${{ inputs.source }}
+          PATCH_REFS: ${{ inputs.patch_refs }}
           NO_PUSH: ${{ inputs.no_push || false }}
