@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
+import { bootstrapPatchlane } from './bootstrap.js';
 import { loadPatchlaneConfig } from './config.js';
 import { runDoctor } from './doctor.js';
 import { initializePatchlane } from './init.js';
@@ -65,6 +66,18 @@ cli.command('init', 'Create Patchlane config and workflow files')
 			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
 			process.exit(1);
 		}
+	});
+
+cli.command('bootstrap', 'Validate and publish the first generated sync branch')
+	.option('--publish', 'Publish the generated sync branch after validation')
+	.option('--wait', 'Publish, wait for CI, and perform the initial promotion')
+	.action((args) => {
+		void bootstrapPatchlane({ publish: args.publish === true, wait: args.wait === true }).catch(
+			(error: unknown) => {
+				process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+				process.exit(1);
+			},
+		);
 	});
 
 cli.command('doctor', 'Check Patchlane configuration without changing repository state')
