@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveUpstreamSource } from './upstream-source.js';
 
 type RunOptions = {
 	cwd?: string;
@@ -206,6 +207,7 @@ export type IntegrationSyncOptions = {
 	upstreamRepo: string;
 	patchRefs: string;
 	baseBranch?: string;
+	source?: string;
 	upstreamRef?: string;
 	releaseSelector?: string;
 	syncBranch?: string;
@@ -243,8 +245,13 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const patchRefsRaw = options.patchRefs;
 
 	const baseBranch = options.baseBranch ?? 'main';
-	const upstreamRef = options.upstreamRef ?? baseBranch;
-	const releaseSelector = options.releaseSelector ?? '';
+	const upstreamSource = resolveUpstreamSource(
+		options.source,
+		options.upstreamRef ?? baseBranch,
+		options.releaseSelector ?? '',
+	);
+	const upstreamRef = upstreamSource.kind === 'branch' ? upstreamSource.ref : (options.upstreamRef ?? baseBranch);
+	const releaseSelector = upstreamSource.kind === 'release' ? upstreamSource.selector : '';
 	const syncBranch = options.syncBranch ?? 'sync/integration';
 	const dryRun = options.dryRun ?? false;
 	const noPush = options.noPush ?? false;
@@ -309,6 +316,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		diffBase: string;
 		commitSubjects: string[];
 		changedFiles: string[];
+		upstreamCommits: string[];
 		warnings: string[];
 	};
 
@@ -354,6 +362,13 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			.split('\n')
 			.filter(Boolean);
 		const commitSubjects = commitShas.map((sha) => git(['log', '-1', '--format=%s', sha]).stdout.trim());
+		const upstreamCommits = commitShas.filter((sha) => {
+			const containingRefs = git(
+				['for-each-ref', `--contains=${sha}`, '--format=%(refname)', `refs/remotes/${upstreamRemoteName}`],
+				{ allowFailure: true },
+			).stdout.trim();
+			return Boolean(containingRefs);
+		});
 		const changedFiles = git(['diff', '--name-only', `${diffBase}...${resolved}`], {
 			allowFailure: true,
 		})
@@ -369,10 +384,36 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			warnings.push('Appears to be based on sync branch output');
 		}
 
-		return { ref, resolvedSha, mergeBase, diffBase, commitSubjects, changedFiles, warnings };
+		return { ref, resolvedSha, mergeBase, diffBase, commitSubjects, changedFiles, upstreamCommits, warnings };
 	}
 
-	function validatePatch(ref: string, resolved: string, diffBase: string) {
+	function validatePatch(diagnostic: PatchDiagnostic, resolved: string) {
+		const { ref, diffBase, upstreamCommits } = diagnostic;
+		if (upstreamCommits.length) {
+			const failedCommit = upstreamCommits[0]!;
+			const failedSubject = git(['log', '-1', '--format=%s', failedCommit]).stdout.trim();
+			const reason = `Patch ref '${ref}' includes ${upstreamCommits.length} upstream commit(s) that are not part of ${sourceLabel}.`;
+			const body = [
+				`- Base: \`${upstreamBase}\``,
+				`- Source: \`${sourceLabel}\``,
+				`- Failed bookmark: \`${ref}\``,
+				`- First unexpected upstream commit: \`${failedCommit.slice(0, 7)} ${failedSubject}\``,
+				`- Reason: ${reason}`,
+			].join('\n');
+			writeOutput('failed_bookmark', ref);
+			writeOutput('failed_commit', failedCommit);
+			writeOutput('conflicted_paths', '');
+			writeOutput('applied_refs', '');
+			writeOutput('sync_branch', syncBranch);
+			writeOutput('status', 'invalid_patch_base');
+			writeSummary(
+				'## Integration rebuild failed',
+				body,
+				`Recreate \`${ref}\` from ${sourceLabel} so it contains only fork-owned commits.`,
+			);
+			fail(`${reason} Recreate the patch branch from ${sourceLabel}.`);
+		}
+
 		if (!allowDependentPatches) {
 			const generated = hasGeneratedAncestry(resolved, diffBase);
 			const basedOnSync = isBasedOnSyncBranch(resolved, remoteSyncRef);
@@ -456,7 +497,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			}
 
 			const d = gatherPatchDiagnostics(ref, resolved);
-			validatePatch(ref, resolved, d.diffBase);
+			validatePatch(d, resolved);
 			patchDiagnostics.push(d);
 
 			const commitRange = `${d.diffBase}..${resolved}`;
@@ -688,6 +729,7 @@ function main() {
 		patchRefs: requireEnv('PATCH_REFS'),
 		baseBranch: getEnv('BASE_BRANCH', 'main'),
 		upstreamRef: getEnv('UPSTREAM_REF'),
+		source: getEnv('UPSTREAM_SOURCE'),
 		releaseSelector: getEnv('RELEASE_SELECTOR'),
 		syncBranch: getEnv('SYNC_BRANCH', 'sync/integration'),
 		dryRun: isTrue(getEnv('DRY_RUN', 'false')),

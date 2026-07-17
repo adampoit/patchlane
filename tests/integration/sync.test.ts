@@ -182,6 +182,7 @@ test('integration sync CLI rebuilds from releases and branch refs', () => {
 		const forkSeed = path.join(tempRoot, 'fork-seed');
 		const forkWork = path.join(tempRoot, 'fork-work');
 		const branchWork = path.join(tempRoot, 'branch-work');
+		const wrongBaseWork = path.join(tempRoot, 'wrong-base-work');
 		const conflictWork = path.join(tempRoot, 'conflict-work');
 
 		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
@@ -313,6 +314,28 @@ test('integration sync CLI rebuilds from releases and branch refs', () => {
 		expect(readOutput(run3Out, 'status')).toBe('no_push');
 		expect(existsSync(path.join(branchWork, 'BRANCH.txt'))).toBe(true);
 		expect(existsSync(path.join(branchWork, 'BRANCH-PATCH.txt'))).toBe(true);
+
+		git(['clone', forkBare, wrongBaseWork], tempRoot);
+		configureUser(wrongBaseWork);
+		const wrongBaseOut = path.join(tempRoot, 'wrong-base.out');
+		const wrongBaseSummary = path.join(tempRoot, 'wrong-base.summary');
+		const wrongBaseRun = runSync(
+			wrongBaseWork,
+			stateDir,
+			wrongBaseOut,
+			wrongBaseSummary,
+			'patch/branch',
+			'main',
+			'latest',
+			true,
+			upstreamBare,
+		);
+
+		expect(wrongBaseRun.status).not.toBe(0);
+		expect(readOutput(wrongBaseOut, 'status')).toBe('invalid_patch_base');
+		expect(readOutput(wrongBaseOut, 'failed_bookmark')).toBe('patch/branch');
+		expect(wrongBaseRun.stderr).toContain('includes 1 upstream commit(s)');
+		expect(readFileSync(wrongBaseSummary, 'utf8')).toContain('Recreate `patch/branch` from release v1.1.0');
 
 		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.2.0', 'v1.2.0', '# Upstream Project v1.2.0');
 		createPatchBranch(forkSeed, 'patch/conflict', 'v1.1.0', 'README.md', '# Fork Conflict');
