@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveUpstreamSource } from './upstream-source.js';
 
 type RunOptions = {
 	cwd?: string;
@@ -206,6 +207,7 @@ export type IntegrationSyncOptions = {
 	upstreamRepo: string;
 	patchRefs: string;
 	baseBranch?: string;
+	source?: string;
 	upstreamRef?: string;
 	releaseSelector?: string;
 	syncBranch?: string;
@@ -243,8 +245,13 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const patchRefsRaw = options.patchRefs;
 
 	const baseBranch = options.baseBranch ?? 'main';
-	const upstreamRef = options.upstreamRef ?? baseBranch;
-	const releaseSelector = options.releaseSelector ?? '';
+	const upstreamSource = resolveUpstreamSource(
+		options.source,
+		options.upstreamRef ?? baseBranch,
+		options.releaseSelector ?? '',
+	);
+	const upstreamRef = upstreamSource.kind === 'branch' ? upstreamSource.ref : (options.upstreamRef ?? baseBranch);
+	const releaseSelector = upstreamSource.kind === 'release' ? upstreamSource.selector : '';
 	const syncBranch = options.syncBranch ?? 'sync/integration';
 	const dryRun = options.dryRun ?? false;
 	const noPush = options.noPush ?? false;
@@ -688,6 +695,7 @@ function main() {
 		patchRefs: requireEnv('PATCH_REFS'),
 		baseBranch: getEnv('BASE_BRANCH', 'main'),
 		upstreamRef: getEnv('UPSTREAM_REF'),
+		source: getEnv('UPSTREAM_SOURCE'),
 		releaseSelector: getEnv('RELEASE_SELECTOR'),
 		syncBranch: getEnv('SYNC_BRANCH', 'sync/integration'),
 		dryRun: isTrue(getEnv('DRY_RUN', 'false')),

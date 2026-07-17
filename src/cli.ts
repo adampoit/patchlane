@@ -3,6 +3,7 @@ import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { runPromoteSync } from './promote-sync.js';
+import { parseUpstreamSource } from './upstream-source.js';
 
 const cli = cac('patchlane');
 
@@ -41,10 +42,13 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 	.option('--base-branch <branch>', 'Fork branch promoted later', {
 		default: env('BASE_BRANCH', 'main'),
 	})
-	.option('--upstream-ref <ref>', 'Upstream branch when not using releases', {
+	.option('--source <source>', 'Upstream source: release:latest, release:<regex>, or branch:<ref>', {
+		default: env('UPSTREAM_SOURCE'),
+	})
+	.option('--upstream-ref <ref>', 'Legacy branch source; prefer --source=branch:<ref>', {
 		default: env('UPSTREAM_REF'),
 	})
-	.option('--release-selector <selector>', 'latest, prerelease, regex, or blank', {
+	.option('--release-selector <selector>', 'Legacy release selector; prefer --source=release:<selector>', {
 		default: env('RELEASE_SELECTOR'),
 	})
 	.option('--sync-branch <branch>', 'Published generated branch name', {
@@ -79,12 +83,28 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 			process.stderr.write('Error: --patch-refs is required\n');
 			process.exit(1);
 		}
+		if (!args.source && !args.upstreamRef && !args.releaseSelector) {
+			cli.outputHelp();
+			process.stderr.write(
+				'Error: --source is required (for example, --source=release:latest or --source=branch:main)\n',
+			);
+			process.exit(1);
+		}
+		if (args.source) {
+			try {
+				parseUpstreamSource(args.source);
+			} catch (error) {
+				process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+				process.exit(1);
+			}
+		}
 
 		runIntegrationSync({
 			upstreamOwner: args.upstreamOwner,
 			upstreamRepo: args.upstreamRepo,
 			patchRefs: args.patchRefs,
 			baseBranch: args.baseBranch,
+			source: args.source,
 			upstreamRef: args.upstreamRef,
 			releaseSelector: args.releaseSelector,
 			syncBranch: args.syncBranch,
