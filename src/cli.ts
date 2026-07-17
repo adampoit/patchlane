@@ -89,7 +89,7 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 			releaseSelector: args.releaseSelector,
 			syncBranch: args.syncBranch,
 			dryRun: args.dryRun === true || env('DRY_RUN') === 'true',
-			noPush: args.noPush === true || env('NO_PUSH') === 'true',
+			noPush: args.push === false || env('NO_PUSH') === 'true',
 			forcePush: args.forcePush === true || env('FORCE_PUSH') === 'true',
 			allowDependentPatches: args.allowDependentPatches === true,
 			originRemoteName: args.originRemoteName,
