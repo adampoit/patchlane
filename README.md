@@ -1,271 +1,118 @@
 # Patchlane
 
-**Keep your fork in sync without the merge headaches.**
+**Keep a customized fork current without merge commits or untested promotions.**
 
-Patchlane is an npm CLI that automates maintaining forked repositories with custom patches. It rebuilds an integration branch from upstream, reapplies your patch branches, publishes the result for CI, and then promotes the exact tested commit onto your fork branch automatically.
-
-Install it from npm and run it locally or inside your own workflows:
-
-```bash
-npx patchlane sync --upstream-owner=kubernetes --upstream-repo=kubernetes --patch-refs="patch/product,patch/sync"
-```
-
-If you want AI coding agents to help maintain a Patchlane fork, install the repo-managed skills into the standard `.agents/skills` folder:
-
-```bash
-npx patchlane agents
-```
-
-## How It Works
-
-1. **Rebuild** – Patchlane creates a fresh integration branch from an upstream branch or release tag.
-2. **Apply patches** – Your configured patch branches are applied sequentially.
-3. **Fail fast** – If a patch conflicts, the workflow stops and reports which patch failed and why.
-4. **Publish** – The rebuilt branch is force-pushed to `sync_branch` and its commit SHA is recorded.
-5. **Run CI** – Your fork's CI runs on `sync_branch` and validates the result.
-6. **Promote** – A second step force-with-lease updates `base_branch` only if `sync_branch` still points at the tested SHA.
+Patchlane rebuilds an integration branch from an upstream release or branch, reapplies focused patch branches, runs your existing CI, and promotes the exact tested commit.
 
 ## Quick Start
 
-### Prerequisites
+`patchlane init` generates the configuration and workflows, `patchlane doctor` verifies the complete patch stack, and `patchlane bootstrap` performs the first tested promotion.
 
-- A forked repository on GitHub.
-- `permissions: contents: write` in your workflow so the default `GITHUB_TOKEN` can push branches.
+Follow the short [manual setup walkthrough](docs/manual-setup.md) to create the independently based patch branches and run those commands safely.
 
-### 1. Create Patch Branches
+## How It Works
 
-Organize your fork-specific changes into logical patch branches and push them to your fork:
+1. Resolve an explicit source such as `release:latest` or `branch:main`.
+2. Rebuild `sync/integration` from that source.
+3. Replay the configured patch branches in order.
+4. Run the fork's existing CI on the generated branch.
+5. Promote only the exact SHA that passed CI.
+
+The promoted base branch is generated output. Fork-owned changes belong on `patch/*` branches.
+
+## Configuration
+
+`patchlane init` creates `.patchlane.yml` and pinned GitHub workflow files:
+
+```yaml
+version: 1
+upstream: upstream-org/upstream-repo
+source: release:latest
+baseBranch: main
+syncBranch: sync/integration
+patchRefs:
+    - patch/sync
+    - patch/ci
+    - patch/product
+ciWorkflow: CI
+```
+
+Supported sources:
+
+- `release:latest`
+- `release:prerelease`
+- `release:<regex>`
+- `branch:<ref>`
+
+CLI flags and environment variables can override config values for one run. Legacy `UPSTREAM_REF` and `RELEASE_SELECTOR` settings remain supported.
+
+## Commands
 
 ```bash
-git checkout -b patch/product
-git checkout -b patch/sync
-git checkout -b patch/ci
-```
+# Create config and pinned workflow files
+npx patchlane init --upstream=upstream-org/upstream-repo --source=release:latest
 
-### 2. Add the Sync Workflow
+# Check remotes, source resolution, patch bases, CI triggers, and bootstrap state
+npx patchlane doctor
+npx patchlane doctor --json
 
-Create `.github/workflows/sync-upstream.yml` in your fork:
+# Validate without changing the working tree or publishing a branch
+npx patchlane sync --dry-run
 
-```yaml
-name: Sync Upstream Integration
+# Validate the initial setup, then publish/wait/promote when ready
+npx patchlane bootstrap
+npx patchlane bootstrap --publish
+npx patchlane bootstrap --wait
 
-on:
-    schedule:
-        - cron: '0 10 * * *'
-    workflow_dispatch:
-        inputs:
-            no_push:
-                description: 'Build the sync branch locally but do not push'
-                type: boolean
-                default: false
+# Normal rebuild; publishes sync/integration unless unchanged
+npx patchlane sync
 
-permissions:
-    contents: write
+# Build the local sync branch but do not publish it
+npx patchlane sync --no-push
 
-jobs:
-    sync:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
+# Promote an exact tested SHA
+npx patchlane promote --expected-sync-sha=<sha>
 
-            - uses: actions/setup-node@v4
-              with:
-                  node-version: '22'
-
-            - name: Run patchlane sync
-              run: npx patchlane@latest sync
-              env:
-                  UPSTREAM_OWNER: kubernetes
-                  UPSTREAM_REPO: kubernetes
-                  BASE_BRANCH: main
-                  SYNC_BRANCH: sync/integration
-                  PATCH_REFS: |
-                      patch/product
-                      patch/sync
-                      patch/ci
-                  NO_PUSH: ${{ inputs.no_push || false }}
-```
-
-### 3. Add a CI Workflow
-
-Create `.github/workflows/fork-ci.yml` in your fork. **It must run on `sync_branch` pushes** so the promotion workflow receives the tested `head_sha`:
-
-```yaml
-name: Fork CI
-
-on:
-    pull_request:
-    push:
-        branches:
-            - main
-            - sync/integration
-
-jobs:
-    build-and-test:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-            - run: echo "Replace this with your fork's actual CI checks."
-```
-
-### 4. Add the Promotion Workflow
-
-Create `.github/workflows/promote-tested-sync.yml` in your fork:
-
-```yaml
-name: Promote Tested Sync Branch
-
-on:
-    workflow_run:
-        workflows: ['Fork CI']
-        types: [completed]
-
-permissions:
-    contents: write
-
-jobs:
-    promote:
-        if: >-
-            github.event.workflow_run.conclusion == 'success' &&
-            github.event.workflow_run.head_branch == 'sync/integration'
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
-
-            - uses: actions/setup-node@v4
-              with:
-                  node-version: '22'
-
-            - name: Run patchlane promote
-              run: npx patchlane@latest promote
-              env:
-                  BASE_BRANCH: main
-                  SYNC_BRANCH: sync/integration
-                  EXPECTED_SYNC_SHA: ${{ github.event.workflow_run.head_sha }}
-```
-
-### 5. Run It
-
-Trigger the sync workflow manually with `no_push: true` first to verify your patches apply cleanly.
-
----
-
-## CLI Usage
-
-You can run Patchlane directly via `npx` without cloning the repository:
-
-```bash
-# Install or update Patchlane-managed agent skills
+# Install Patchlane's optional agent skills
 npx patchlane agents
-
-# Sync (rebuild integration branch)
-npx patchlane sync \
-  --upstream-owner=kubernetes \
-  --upstream-repo=kubernetes \
-  --patch-refs="patch/product,patch/sync,patch/ci" \
-  --base-branch=main \
-  --sync-branch=sync/integration \
-  --no-push
-
-# Promote (after CI passes)
-npx patchlane promote \
-  --expected-sync-sha=abc123 \
-  --base-branch=main \
-  --sync-branch=sync/integration
 ```
 
-Every CLI flag also falls back to an environment variable of the same name (e.g. `--upstream-owner` → `UPSTREAM_OWNER`).
+`--dry-run` is the safest local validation mode. `--no-push` does not publish, but it does create or reset the local sync branch.
 
-### Agent Skill Installer
+## Initial Bootstrap
 
-`patchlane agents` downloads the latest Patchlane-maintained skills from GitHub and installs them into `.agents/skills` in the current repository. Re-running it updates the managed Patchlane skill folders in place while leaving unrelated custom skills alone.
+Patchlane workflows live on `patch/sync`, so they are not available on the default branch before the first promotion. `patchlane bootstrap` handles this explicitly:
 
-Options:
+- no flags: validate only
+- `--publish`: publish the generated branch and print the exact promotion command
+- `--wait`: publish, wait for the configured CI workflow, and promote the successful SHA
 
-- `--dir` sets the destination folder. Default: `.agents/skills`
-- `--ref` pulls skills from a specific Patchlane git ref. Default: `main`
+After bootstrap, scheduled sync and automatic promotion workflows take over.
 
----
+## Sync Reference
 
-## Configuration Reference
+| Setting / Env Var     | Default            | Description                                       |
+| --------------------- | ------------------ | ------------------------------------------------- |
+| `upstream`            | required           | GitHub repository in `owner/repo` form            |
+| `source`              | required           | Explicit release or branch source                 |
+| `patchRefs`           | required           | Ordered independent patch branches                |
+| `baseBranch`          | `main`             | Generated branch updated after successful CI      |
+| `syncBranch`          | `sync/integration` | Generated branch published for CI                 |
+| `ciWorkflow`          | detected by init   | Existing workflow name used by `workflow_run`     |
+| `DRY_RUN`             | `false`            | Validate in a detached worktree                   |
+| `NO_PUSH`             | `false`            | Build locally without publishing                  |
+| `FORCE_PUSH`          | `false`            | Publish even when the generated tree is unchanged |
+| `UPSTREAM_REMOTE_URL` | inferred           | Override the upstream Git remote URL              |
 
-### Sync Options
-
-| Option / Env Var       | Required | Default            | Description                                                                           |
-| ---------------------- | -------- | ------------------ | ------------------------------------------------------------------------------------- |
-| `upstream_owner`       | ✅       | —                  | GitHub owner/org of the upstream repository                                           |
-| `upstream_repo`        | ✅       | —                  | Upstream repository name                                                              |
-| `patch_refs`           | ✅       | —                  | Comma- or newline-delimited list of patch branches (applied in order)                 |
-| `base_branch`          | —        | `main`             | Fork branch later promoted by the promotion workflow                                  |
-| `upstream_ref`         | —        | `main`             | Upstream branch when not using releases                                               |
-| `release_selector`     | —        | `latest`           | `latest`, `prerelease`, regex, or blank for `upstream_ref`                            |
-| `sync_branch`          | —        | `sync/integration` | Published generated branch name                                                       |
-| `dry_run`              | —        | `false`            | Validate patches and test whether they apply cleanly without creating the sync branch |
-| `no_push`              | —        | `false`            | Build the sync branch locally but do not push                                         |
-| `origin_remote_name`   | —        | `origin`           | Name of the fork remote                                                               |
-| `upstream_remote_name` | —        | `upstream`         | Name of the upstream remote                                                           |
-| `upstream_remote_url`  | —        | inferred           | URL of the upstream remote (inferred from owner/repo if omitted)                      |
-
-### Sync Outputs
-
-When running in a GitHub Actions environment, Patchlane writes the following outputs to `GITHUB_OUTPUT`:
-
-| Output             | Description                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------- |
-| `sync_branch`      | The generated branch that was built                                                               |
-| `sync_sha`         | The commit SHA published to `sync_branch`                                                         |
-| `failed_bookmark`  | First patch that failed to apply                                                                  |
-| `failed_commit`    | Commit at the head of the failed patch                                                            |
-| `conflicted_paths` | Files with conflicts                                                                              |
-| `applied_refs`     | Successfully applied patches                                                                      |
-| `status`           | `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, or `invalid_patch` |
-
-### Promote Options
-
-| Option / Env Var     | Required | Default            | Description                                                         |
-| -------------------- | -------- | ------------------ | ------------------------------------------------------------------- |
-| `expected_sync_sha`  | ✅       | —                  | Tested commit SHA that must still be the current `sync_branch` head |
-| `base_branch`        | —        | `main`             | Fork branch promoted to the tested sync commit                      |
-| `sync_branch`        | —        | `sync/integration` | Generated branch that already passed CI                             |
-| `origin_remote_name` | —        | `origin`           | Name of the fork remote                                             |
-
-### Promote Outputs
-
-| Output         | Description                                     |
-| -------------- | ----------------------------------------------- |
-| `promoted_sha` | Commit SHA promoted onto `base_branch`          |
-| `status`       | `promoted`, `stale_sync`, or `promotion_failed` |
-
----
-
-## Patch Format
-
-`patch_refs` accepts comma- or newline-delimited branch names. Use commas for `workflow_dispatch` inputs (the GitHub UI handles single-line text more reliably) and newlines for committed YAML:
-
-```yaml
-# Good for workflow_dispatch inputs
-patch_refs: patch/product, patch/sync, patch/ci
-
-# Good for committed workflow files
-patch_refs: |
-  patch/product
-  patch/sync
-  patch/ci
-```
+GitHub Actions outputs include `status`, `sync_branch`, `sync_sha`, `applied_refs`, `failed_bookmark`, `failed_commit`, and `conflicted_paths`. Status can be `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, `invalid_patch`, or `invalid_patch_base`.
 
 ## Best Practices
 
-- **Keep patches focused** – Each patch branch should address a single concern.
-- **Order matters** – Put foundational patches first (e.g., `patch/ci` before `patch/product`).
-- **Store workflows on patches** – Your fork's CI and sync workflows should live on patch branches, not the promoted base branch.
-- **Treat the base branch as generated output** – Avoid direct commits on `base_branch`; put fork-owned changes on `patch/*`.
-- **Test locally first** – Use `no_push: true` to validate before letting automation push.
-
----
+- Create every patch branch independently from the selected upstream source.
+- Keep patches focused and order foundational changes first.
+- Preserve the existing CI workflow name and configure `ciWorkflow` to match it.
+- Run `patchlane doctor` and `patchlane sync --dry-run` before publishing.
+- Treat the promoted base and sync branches as generated output.
 
 ## Development
 
@@ -273,8 +120,6 @@ patch_refs: |
 npm install
 npm test
 ```
-
-This builds the TypeScript and runs the integration harness with mocked git operations.
 
 ## License
 
