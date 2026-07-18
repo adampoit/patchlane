@@ -2,18 +2,19 @@
 import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
 import { bootstrapPatchlane } from './bootstrap.js';
-import { loadPatchlaneConfig } from './config.js';
+import { loadPatchlaneConfig, NOTIFICATION_EVENTS, type NotificationEvent } from './config.js';
 import { runDoctor } from './doctor.js';
 import { initializePatchlane } from './init.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { getPackageVersion } from './package-version.js';
+import { runNotification } from './notify.js';
 import { runPromoteSync } from './promote-sync.js';
 import { parseUpstreamSource } from './upstream-source.js';
 
 const cli = cac('patchlane');
 
 let config: ReturnType<typeof loadPatchlaneConfig>;
-if (['sync', 'promote'].includes(process.argv[2] ?? '')) {
+if (['sync', 'promote', 'notify'].includes(process.argv[2] ?? '')) {
 	try {
 		config = loadPatchlaneConfig();
 	} catch (error) {
@@ -188,6 +189,71 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 			upstreamRemoteName: args.upstreamRemoteName,
 			upstreamRemoteUrl: args.upstreamRemoteUrl,
 		});
+	});
+
+cli.command('notify', 'Create, update, or close an automation failure issue')
+	.option('--event <event>', 'Notification event: sync-failed, ci-failed, or promotion-failed')
+	.option('--recovered', 'Close the open notification after recovery')
+	.option('--repository <owner/repo>', 'GitHub repository; defaults to the current fork', {
+		default: env('GITHUB_REPOSITORY'),
+	})
+	.option('--status <status>', 'Failure status', { default: env('PATCHLANE_STATUS') })
+	.option('--run-url <url>', 'Workflow run URL', {
+		default: env(
+			'PATCHLANE_RUN_URL',
+			process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+				? `${env('GITHUB_SERVER_URL', 'https://github.com')}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+				: undefined,
+		),
+	})
+	.option('--upstream-source <source>', 'Configured upstream source', {
+		default: env('UPSTREAM_SOURCE', config?.source),
+	})
+	.option('--upstream-sha <sha>', 'Resolved upstream SHA', { default: env('UPSTREAM_SHA') })
+	.option('--sync-sha <sha>', 'Generated or tested sync SHA', { default: env('SYNC_SHA') })
+	.option('--base-branch <branch>', 'Fork base branch', {
+		default: env('BASE_BRANCH', config?.baseBranch),
+	})
+	.option('--sync-branch <branch>', 'Generated sync branch', {
+		default: env('SYNC_BRANCH', config?.syncBranch),
+	})
+	.option('--failed-patch-ref <ref>', 'Failing patch ref', { default: env('FAILED_PATCH_REF') })
+	.option('--failed-commit <sha>', 'Failing patch commit', { default: env('FAILED_COMMIT') })
+	.option('--conflict-paths <paths>', 'Newline- or comma-delimited conflict paths', {
+		default: env('CONFLICT_PATHS'),
+	})
+	.option('--applied-patch-refs <refs>', 'Newline- or comma-delimited applied patch refs', {
+		default: env('APPLIED_PATCH_REFS'),
+	})
+	.action((args) => {
+		if (!config) {
+			process.stderr.write('Missing .patchlane.yml. Run `npx patchlane init` first.\n');
+			process.exitCode = 1;
+			return;
+		}
+		if (!NOTIFICATION_EVENTS.includes(args.event as NotificationEvent)) {
+			process.stderr.write(`Invalid notification event '${String(args.event ?? '')}'.\n`);
+			process.exitCode = 1;
+			return;
+		}
+		const result = runNotification({
+			config,
+			event: args.event as NotificationEvent,
+			recovered: args.recovered === true,
+			repository: args.repository,
+			status: args.status,
+			runUrl: args.runUrl,
+			upstreamSource: args.upstreamSource,
+			upstreamSha: args.upstreamSha,
+			syncSha: args.syncSha,
+			baseBranch: args.baseBranch,
+			syncBranch: args.syncBranch,
+			failedPatchRef: args.failedPatchRef,
+			failedCommit: args.failedCommit,
+			conflictPaths: args.conflictPaths,
+			appliedPatchRefs: args.appliedPatchRefs,
+		});
+		if (result.status !== 'failed') process.stdout.write(`Notification status: ${result.status}\n`);
 	});
 
 cli.command('promote', 'Promote tested sync branch onto base branch')

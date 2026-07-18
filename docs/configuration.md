@@ -17,6 +17,12 @@ patchRefs:
 ciWorkflow: CI
 allowedWorkflows:
     - ci.yml
+notifications:
+    githubIssues:
+        assignees: [maintainer]
+        labels: [patchlane, automation-failure]
+        events: [sync-failed, ci-failed, promotion-failed]
+        closeOnRecovery: true
 ```
 
 | Field              | Required    | Description                                                       |
@@ -29,6 +35,7 @@ allowedWorkflows:
 | `patchRefs`        | yes         | Independent patch branches applied in order                       |
 | `ciWorkflow`       | recommended | Exact existing CI workflow name used by `workflow_run`            |
 | `allowedWorkflows` | yes         | Repository workflow filenames permitted alongside generated ones  |
+| `notifications`    | no          | Automation failure notification providers                         |
 
 Patchlane implicitly adds its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows to the allowlist. Configure only repository-specific workflows such as CI; use an empty list when no additional workflows are expected. Doctor, every sync mode, and promotion reject unexpected or missing workflow files and dangling local reusable-workflow references. Sync validates after all patches are composed and before publishing `syncBranch`; promotion validates the exact `EXPECTED_SYNC_SHA`.
 
@@ -40,6 +47,8 @@ Supported sources:
 - `branch:<ref>`
 
 CLI flags and environment variables override config values for one run. Legacy `UPSTREAM_OWNER`, `UPSTREAM_REPO`, `UPSTREAM_REF`, `RELEASE_SELECTOR`, `BASE_BRANCH`, `SYNC_BRANCH`, and `PATCH_REFS` variables remain supported for migration.
+
+GitHub issue notifications are optional. Patchlane keeps one issue per failure event, updates it on repeated failures, assigns configured users individually, and closes it after a successful run when `closeOnRecovery` is enabled. The generated workflows request `issues: write` only when they handle an enabled GitHub issue event. Notification API errors are warnings and do not replace the sync, CI, or promotion result.
 
 ## Commands
 
@@ -105,6 +114,19 @@ npx patchlane promote --expected-sync-sha=<sha>
 
 Promotion verifies that the tested SHA is still the current sync-branch head before updating the generated base branch with force-with-lease.
 
+### Report an automation result
+
+Generated workflows invoke this command automatically:
+
+```bash
+npx patchlane notify --event=sync-failed
+npx patchlane notify --event=ci-failed
+npx patchlane notify --event=promotion-failed
+npx patchlane notify --event=sync-failed --recovered
+```
+
+The repository defaults to `GITHUB_REPOSITORY` in Actions or the GitHub `origin` remote locally. Structured context can be supplied with flags or the `PATCHLANE_STATUS`, `PATCHLANE_RUN_URL`, `UPSTREAM_SHA`, `SYNC_SHA`, `FAILED_PATCH_REF`, `FAILED_COMMIT`, `CONFLICT_PATHS`, and `APPLIED_PATCH_REFS` environment variables.
+
 ### Install agent skills
 
 ```bash
@@ -135,6 +157,7 @@ Patchlane writes these outputs when `GITHUB_OUTPUT` is available:
 - `status`
 - `sync_branch`
 - `sync_sha`
+- `upstream_sha`
 - `applied_refs`
 - `failed_bookmark`
 - `failed_commit`

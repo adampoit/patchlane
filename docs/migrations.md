@@ -64,6 +64,36 @@ npx patchlane@VERSION bootstrap --wait
 
 This validates the allowlist before publishing `sync/integration`, waits for CI on the exact published SHA, revalidates that SHA, and then promotes it. Confirm afterward that the generated base contains the intended workflow set and that scheduled syncs use the new Patchlane version.
 
+### 5. Optionally enable maintainer notifications
+
+Failure notifications are opt-in. Existing configurations that omit `notifications` keep their current behavior and require no notification-specific migration.
+
+To enable notifications, add the provider configuration to the patch branch that owns `.patchlane.yml`:
+
+```yaml
+notifications:
+    githubIssues:
+        assignees:
+            - maintainer
+        labels:
+            - patchlane
+            - automation-failure
+        events:
+            - sync-failed
+            - ci-failed
+            - promotion-failed
+        closeOnRecovery: true
+```
+
+Update both generated workflow files from the vNext templates in the same patch:
+
+- `sync-upstream.yml` must grant `issues: write`, report `sync-failed` after a failed sync, and optionally report recovery after success.
+- `promote-tested-sync.yml` must grant `issues: write`, report unsuccessful CI workflow runs, report failed promotions, and optionally report each recovery.
+
+Do not add only the configuration block: existing workflow files do not invoke `patchlane notify`, and `patchlane doctor` reports missing `issues: write` permissions. Keep notification steps on `continue-on-error` so a GitHub API or assignment failure cannot replace the original automation result.
+
+Run `doctor`, then roll the configuration and workflow changes forward through `bootstrap --wait` as described above. Confirm that configured labels exist and that each assignee can be assigned to issues in the fork.
+
 ## 0.4
 
 Existing Patchlane forks can migrate without rebuilding their patch strategy or interrupting scheduled syncs. Legacy workflow environment variables remain supported, so migration can be rolled out through the existing sync and promotion flow.

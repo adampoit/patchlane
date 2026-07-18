@@ -53,6 +53,11 @@ function remoteUrl(cwd: string, remote: string) {
 	return result.status === 0 ? result.stdout : undefined;
 }
 
+function githubRepository(remote: string | undefined) {
+	const match = remote?.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/);
+	return match ? `${match[1]}/${match[2]}` : undefined;
+}
+
 function resolveRelease(config: PatchlaneConfig, selector: string, cwd: string) {
 	const repo = `${config.upstreamOwner}/${config.upstreamRepo}`;
 	if (selector === 'latest') {
@@ -224,13 +229,13 @@ function configuredBranches(workflow: Record<string, unknown>) {
 	return Array.isArray(branches) ? branches.filter((branch): branch is string => typeof branch === 'string') : [];
 }
 
-function hasWriteContents(workflow: Record<string, unknown>) {
+function hasWritePermission(workflow: Record<string, unknown>, permission: string) {
 	const permissions = workflow.permissions;
 	return (
 		typeof permissions === 'object' &&
 		permissions !== null &&
 		!Array.isArray(permissions) &&
-		(permissions as Record<string, unknown>).contents === 'write'
+		(permissions as Record<string, unknown>)[permission] === 'write'
 	);
 }
 
@@ -245,14 +250,36 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 	const ci = parsed.find((file) => workflowName(file.workflow) === config.ciWorkflow);
 
 	if (!sync?.workflow) checks.push({ severity: 'error', message: 'Missing .github/workflows/sync-upstream.yml.' });
-	else if (!hasWriteContents(sync.workflow)) {
-		checks.push({ severity: 'error', message: 'The sync workflow must grant contents: write.' });
+	else {
+		if (!hasWritePermission(sync.workflow, 'contents')) {
+			checks.push({ severity: 'error', message: 'The sync workflow must grant contents: write.' });
+		}
+		if (
+			config.notifications?.githubIssues.events.includes('sync-failed') &&
+			!hasWritePermission(sync.workflow, 'issues')
+		) {
+			checks.push({
+				severity: 'error',
+				message: 'The sync workflow must grant issues: write for GitHub issue notifications.',
+			});
+		}
 	}
 	if (!promotion?.workflow) {
 		checks.push({ severity: 'error', message: 'Missing .github/workflows/promote-tested-sync.yml.' });
 	} else {
-		if (!hasWriteContents(promotion.workflow)) {
+		if (!hasWritePermission(promotion.workflow, 'contents')) {
 			checks.push({ severity: 'error', message: 'The promotion workflow must grant contents: write.' });
+		}
+		if (
+			config.notifications?.githubIssues.events.some((event) =>
+				['ci-failed', 'promotion-failed'].includes(event),
+			) &&
+			!hasWritePermission(promotion.workflow, 'issues')
+		) {
+			checks.push({
+				severity: 'error',
+				message: 'The promotion workflow must grant issues: write for GitHub issue notifications.',
+			});
 		}
 		const workflowRun = eventConfig(promotion.workflow, 'workflow_run');
 		const workflows =
@@ -318,6 +345,22 @@ function inspectPatchRefs(config: PatchlaneConfig, sourceSha: string | undefined
 	}
 }
 
+function inspectNotificationAssignees(config: PatchlaneConfig, cwd: string, checks: DoctorCheck[]) {
+	const assignees = config.notifications?.githubIssues.assignees ?? [];
+	const repository = githubRepository(remoteUrl(cwd, 'origin'));
+	if (!assignees.length || !repository || run('gh', ['auth', 'status'], cwd).status !== 0) return;
+
+	for (const assignee of assignees) {
+		const result = run('gh', ['api', `repos/${repository}/assignees/${assignee}`, '--silent'], cwd);
+		if (result.status !== 0) {
+			checks.push({
+				severity: 'warning',
+				message: `Notification user '${assignee}' could not be verified as assignable to '${repository}'.`,
+			});
+		}
+	}
+}
+
 function inspectBootstrap(config: PatchlaneConfig, cwd: string, checks: DoctorCheck[]) {
 	const remoteBase = `refs/remotes/origin/${config.baseBranch}`;
 	if (git(['rev-parse', '--verify', '--quiet', remoteBase], cwd).status !== 0) return;
@@ -348,6 +391,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 		checks.push({ severity: 'info', message: `Resolved ${config.source} to ${resolved.label} @ ${resolved.sha}.` });
 	inspectPatchRefs(config, resolved?.sha, cwd, checks);
 	inspectWorkflows(config, resolved?.sha, cwd, checks);
+	inspectNotificationAssignees(config, cwd, checks);
 	inspectBootstrap(config, cwd, checks);
 
 	return printReport(
