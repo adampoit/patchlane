@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
@@ -21,14 +22,29 @@ type DoctorOptions = {
 	json?: boolean;
 };
 
-function run(command: string, args: string[], cwd: string) {
-	const result = spawnSync(command, args, { cwd, encoding: 'utf8' });
+type RunOptions = {
+	env?: NodeJS.ProcessEnv;
+	input?: string;
+	trimOutput?: boolean;
+};
+
+function run(command: string, args: string[], cwd: string, options: RunOptions = {}) {
+	const result = spawnSync(command, args, {
+		cwd,
+		encoding: 'utf8',
+		env: options.env ?? process.env,
+		input: options.input,
+	});
 	if (result.error) return { status: 1, stdout: '', stderr: result.error.message };
-	return { status: result.status ?? 1, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
+	return {
+		status: result.status ?? 1,
+		stdout: options.trimOutput === false ? result.stdout : result.stdout.trim(),
+		stderr: options.trimOutput === false ? result.stderr : result.stderr.trim(),
+	};
 }
 
-function git(args: string[], cwd: string) {
-	return run('git', args, cwd);
+function git(args: string[], cwd: string, options?: RunOptions) {
+	return run('git', args, cwd, options);
 }
 
 function remoteUrl(cwd: string, remote: string) {
@@ -100,26 +116,82 @@ function resolveSource(config: PatchlaneConfig, cwd: string, checks: DoctorCheck
 	return { label: `release ${tag}`, sha };
 }
 
-function workflowFiles(config: PatchlaneConfig, cwd: string) {
-	const contents = new Map<string, string>();
+function workingTreeWorkflowFiles(cwd: string) {
 	const workflowDir = path.join(cwd, '.github', 'workflows');
-	if (existsSync(workflowDir)) {
-		for (const file of readdirSync(workflowDir).filter((entry) => /\.ya?ml$/.test(entry))) {
-			contents.set(file, readFileSync(path.join(workflowDir, file), 'utf8'));
-		}
+	if (!existsSync(workflowDir)) return [];
+	return readdirSync(workflowDir)
+		.filter((file) => /\.ya?ml$/.test(file))
+		.map((file) => ({ file, content: readFileSync(path.join(workflowDir, file), 'utf8') }));
+}
+
+function workflowFiles(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string) {
+	if (!sourceSha || git(['cat-file', '-e', `${sourceSha}^{commit}`], cwd).status !== 0) {
+		return workingTreeWorkflowFiles(cwd);
 	}
 
-	for (const patchRef of config.patchRefs) {
-		const tree = git(['ls-tree', '-r', '--name-only', patchRef, '.github/workflows'], cwd);
-		if (tree.status !== 0) continue;
-		for (const relativePath of tree.stdout.split(/\r?\n/).filter((entry) => /\.ya?ml$/.test(entry))) {
-			const file = path.basename(relativePath);
-			const content = git(['show', `${patchRef}:${relativePath}`], cwd);
-			if (content.status === 0) contents.set(file, `${content.stdout}\n`);
-		}
+	const tempDir = mkdtempSync(path.join(tmpdir(), 'patchlane-doctor-'));
+	const indexFile = path.join(tempDir, 'index');
+	const indexEnv = { ...process.env, GIT_INDEX_FILE: indexFile };
+
+	function applyPatch(diff: ReturnType<typeof git>) {
+		if (diff.status !== 0 || !diff.stdout) return diff.status === 0;
+		return (
+			git(['apply', '--cached', '--3way', '--whitespace=nowarn', '-'], cwd, {
+				env: indexEnv,
+				input: diff.stdout,
+			}).status === 0
+		);
 	}
 
-	return Array.from(contents, ([file, content]) => ({ file, content }));
+	function applyDiff(from: string, to: string) {
+		return applyPatch(
+			git(['diff', '--binary', '--full-index', from, to, '--', '.github/workflows'], cwd, {
+				trimOutput: false,
+			}),
+		);
+	}
+
+	function applyWorkingTreeChanges(head: string) {
+		const trackedDiff = git(['diff', '--binary', '--full-index', head, '--', '.github/workflows'], cwd, {
+			trimOutput: false,
+		});
+		if (!applyPatch(trackedDiff)) return false;
+		const untracked = git(['ls-files', '--others', '--exclude-standard', '--', '.github/workflows'], cwd)
+			.stdout.split(/\r?\n/)
+			.filter((file) => /\.ya?ml$/.test(file));
+		if (!untracked.length) return true;
+		return git(['add', '--', ...untracked], cwd, { env: indexEnv }).status === 0;
+	}
+
+	try {
+		if (git(['read-tree', sourceSha], cwd, { env: indexEnv }).status !== 0) {
+			return workingTreeWorkflowFiles(cwd);
+		}
+
+		const head = git(['rev-parse', 'HEAD'], cwd).stdout;
+		for (const patchRef of config.patchRefs) {
+			const mergeBase = git(['merge-base', sourceSha, patchRef], cwd);
+			if (mergeBase.status !== 0 || !mergeBase.stdout) continue;
+
+			const commits = git(['rev-list', '--no-merges', '--reverse', `${mergeBase.stdout}..${patchRef}`], cwd)
+				.stdout.split(/\r?\n/)
+				.filter(Boolean);
+			for (const commit of commits) {
+				if (!applyDiff(`${commit}^`, commit)) return workingTreeWorkflowFiles(cwd);
+			}
+		}
+		if (!applyWorkingTreeChanges(head)) return workingTreeWorkflowFiles(cwd);
+
+		const files = git(['ls-files', '.github/workflows'], cwd, { env: indexEnv })
+			.stdout.split(/\r?\n/)
+			.filter((file) => /\.ya?ml$/.test(file));
+		return files.flatMap((relativePath) => {
+			const content = git(['show', `:${relativePath}`], cwd, { env: indexEnv, trimOutput: false });
+			return content.status === 0 ? [{ file: path.basename(relativePath), content: content.stdout }] : [];
+		});
+	} finally {
+		rmSync(tempDir, { force: true, recursive: true });
+	}
 }
 
 function readWorkflow(contents: string) {
@@ -159,8 +231,8 @@ function hasWriteContents(workflow: Record<string, unknown>) {
 	);
 }
 
-function inspectWorkflows(config: PatchlaneConfig, cwd: string, checks: DoctorCheck[]) {
-	const files = workflowFiles(config, cwd);
+function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
+	const files = workflowFiles(config, sourceSha, cwd);
 	const parsed = files.map((file) => ({ ...file, workflow: readWorkflow(file.content) }));
 	const sync = parsed.find((file) => file.file === 'sync-upstream.yml');
 	const promotion = parsed.find((file) => file.file === 'promote-tested-sync.yml');
@@ -269,7 +341,7 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 	if (resolved)
 		checks.push({ severity: 'info', message: `Resolved ${config.source} to ${resolved.label} @ ${resolved.sha}.` });
 	inspectPatchRefs(config, resolved?.sha, cwd, checks);
-	inspectWorkflows(config, cwd, checks);
+	inspectWorkflows(config, resolved?.sha, cwd, checks);
 	inspectBootstrap(config, cwd, checks);
 
 	return printReport(
