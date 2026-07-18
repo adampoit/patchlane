@@ -249,7 +249,7 @@ function jobSteps(job: Record<string, unknown> | undefined) {
 	return Array.isArray(steps) ? steps.flatMap((step) => (objectValue(step) ? [objectValue(step)!] : [])) : [];
 }
 
-function inspectAuthenticatedJob(
+export function inspectAuthenticatedJob(
 	workflowFile: string,
 	jobName: string,
 	job: Record<string, unknown> | undefined,
@@ -432,10 +432,15 @@ function inspectPatchRefs(config: PatchlaneConfig, sourceSha: string | undefined
 	}
 }
 
-function inspectGitHubAutomation(repository: string | undefined, cwd: string, checks: DoctorCheck[]) {
+export function inspectGitHubAutomation(
+	repository: string | undefined,
+	cwd: string,
+	checks: DoctorCheck[],
+	runCommand: typeof run = run,
+) {
 	if (!repository) return;
 
-	const actions = run('gh', ['api', `repos/${repository}/actions/permissions`, '--jq', '.enabled'], cwd);
+	const actions = runCommand('gh', ['api', `repos/${repository}/actions/permissions`, '--jq', '.enabled'], cwd);
 	if (actions.status === 0) {
 		if (actions.stdout !== 'true') {
 			checks.push({ severity: 'error', message: `GitHub Actions is disabled for '${repository}'.` });
@@ -447,7 +452,7 @@ function inspectGitHubAutomation(repository: string | undefined, cwd: string, ch
 		});
 	}
 
-	const variables = run(
+	const variables = runCommand(
 		'gh',
 		['api', '--paginate', `repos/${repository}/actions/variables?per_page=100`, '--jq', '.variables[].name'],
 		cwd,
@@ -466,7 +471,7 @@ function inspectGitHubAutomation(repository: string | undefined, cwd: string, ch
 		});
 	}
 
-	const secrets = run(
+	const secrets = runCommand(
 		'gh',
 		['api', '--paginate', `repos/${repository}/actions/secrets?per_page=100`, '--jq', '.secrets[].name'],
 		cwd,

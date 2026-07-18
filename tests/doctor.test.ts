@@ -1,9 +1,9 @@
-import { expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { runDoctor } from '../src/doctor.js';
+import { inspectAuthenticatedJob, inspectGitHubAutomation, runDoctor, type DoctorCheck } from '../src/doctor.js';
 import type { PatchlaneConfig } from '../src/config.js';
 import { renderPromotionWorkflow, renderSyncWorkflow } from '../src/workflow-templates.js';
 
@@ -30,6 +30,171 @@ function configureUser(repo: string) {
 	git(['config', 'user.name', 'Patchlane Test'], repo);
 	git(['config', 'user.email', 'patchlane@example.test'], repo);
 }
+
+const appToken = '${{ steps.patchlane-token.outputs.token }}';
+
+function validTokenWith() {
+	return {
+		'client-id': '${{ vars.PATCHLANE_APP_CLIENT_ID }}',
+		'private-key': '${{ secrets.PATCHLANE_APP_PRIVATE_KEY }}',
+		'permission-contents': 'write',
+		'permission-workflows': 'write',
+		'permission-issues': 'write',
+	};
+}
+
+function authenticatedJob(
+	options: {
+		includeTokenStep?: boolean;
+		tokenWith?: Record<string, unknown>;
+		checkoutToken?: string;
+		ghToken?: string;
+	} = {},
+) {
+	const tokenWith = options.tokenWith ?? validTokenWith();
+	return {
+		steps: [
+			...(options.includeTokenStep === false
+				? []
+				: [
+						{
+							id: 'patchlane-token',
+							uses: 'actions/create-github-app-token@v3',
+							with: tokenWith,
+						},
+					]),
+			{
+				uses: 'actions/checkout@v4',
+				with: { token: options.checkoutToken ?? appToken },
+			},
+			{
+				run: 'npx patchlane@1.2.3 sync',
+				env: { GH_TOKEN: options.ghToken ?? appToken },
+			},
+		],
+	};
+}
+
+function inspectJob(job: Record<string, unknown> | undefined) {
+	const checks: DoctorCheck[] = [];
+	inspectAuthenticatedJob(
+		'.github/workflows/sync-upstream.yml',
+		'fork-sync',
+		job,
+		{ contents: 'write', workflows: true, issues: true },
+		checks,
+	);
+	return checks;
+}
+
+type AutomationResponse = { status: number; stdout: string; stderr: string };
+
+function automationRunner(overrides: Partial<Record<'actions' | 'variables' | 'secrets', AutomationResponse>> = {}) {
+	const responses = {
+		actions: { status: 0, stdout: 'true', stderr: '' },
+		variables: { status: 0, stdout: 'PATCHLANE_APP_CLIENT_ID', stderr: '' },
+		secrets: { status: 0, stdout: 'PATCHLANE_APP_PRIVATE_KEY', stderr: '' },
+		...overrides,
+	};
+	return (_command: string, args: string[]) => {
+		const endpoint = args.find((arg) => arg.startsWith('repos/')) ?? '';
+		if (endpoint.endsWith('/actions/permissions')) return responses.actions;
+		if (endpoint.includes('/actions/variables')) return responses.variables;
+		if (endpoint.includes('/actions/secrets')) return responses.secrets;
+		throw new Error(`Unexpected command: ${args.join(' ')}`);
+	};
+}
+
+describe('inspectAuthenticatedJob', () => {
+	test('reports a missing job', () => {
+		expect(inspectJob(undefined)).toEqual([
+			{
+				severity: 'error',
+				message: ".github/workflows/sync-upstream.yml must define the 'fork-sync' job.",
+			},
+		]);
+	});
+
+	test('reports a missing App token step', () => {
+		expect(inspectJob(authenticatedJob({ includeTokenStep: false }))).toContainEqual(
+			expect.objectContaining({ message: expect.stringContaining('must create a Patchlane GitHub App token') }),
+		);
+	});
+
+	test.each([
+		['client ID', { 'client-id': '${{ vars.WRONG_CLIENT_ID }}' }],
+		['private key', { 'private-key': '${{ secrets.WRONG_PRIVATE_KEY }}' }],
+		['contents permission', { 'permission-contents': 'read' }],
+		['workflows permission', { 'permission-workflows': 'read' }],
+		['issues permission', { 'permission-issues': 'read' }],
+	])('reports an incorrect App token %s', (_name, override) => {
+		const checks = inspectJob(authenticatedJob({ tokenWith: { ...validTokenWith(), ...override } }));
+		expect(checks).toEqual([
+			expect.objectContaining({ message: expect.stringContaining('must create a Patchlane GitHub App token') }),
+		]);
+	});
+
+	test('reports checkout that does not use the App token', () => {
+		expect(inspectJob(authenticatedJob({ checkoutToken: '${{ github.token }}' }))).toContainEqual(
+			expect.objectContaining({
+				message: expect.stringContaining('must check out with the Patchlane GitHub App token'),
+			}),
+		);
+	});
+
+	test('reports a Patchlane command without GH_TOKEN', () => {
+		expect(inspectJob(authenticatedJob({ ghToken: '${{ github.token }}' }))).toContainEqual(
+			expect.objectContaining({ message: expect.stringContaining('must pass the Patchlane GitHub App token') }),
+		);
+	});
+});
+
+describe('inspectGitHubAutomation', () => {
+	function inspect(overrides: Parameters<typeof automationRunner>[0] = {}) {
+		const checks: DoctorCheck[] = [];
+		inspectGitHubAutomation('example/fork', '/tmp/fork', checks, automationRunner(overrides));
+		return checks;
+	}
+
+	test('reports disabled Actions', () => {
+		expect(inspect({ actions: { status: 0, stdout: 'false', stderr: '' } })).toContainEqual({
+			severity: 'error',
+			message: "GitHub Actions is disabled for 'example/fork'.",
+		});
+	});
+
+	test('reports a missing App client ID variable', () => {
+		expect(inspect({ variables: { status: 0, stdout: 'OTHER_VARIABLE', stderr: '' } })).toContainEqual({
+			severity: 'error',
+			message: "Repository variable 'PATCHLANE_APP_CLIENT_ID' is not configured for 'example/fork'.",
+		});
+	});
+
+	test('reports a missing App private key secret', () => {
+		expect(inspect({ secrets: { status: 0, stdout: 'OTHER_SECRET', stderr: '' } })).toContainEqual({
+			severity: 'error',
+			message: "Repository secret 'PATCHLANE_APP_PRIVATE_KEY' is not configured for 'example/fork'.",
+		});
+	});
+
+	test('warns when GitHub metadata APIs are inaccessible', () => {
+		const failed = { status: 1, stdout: '', stderr: 'HTTP 403' };
+		expect(inspect({ actions: failed, variables: failed, secrets: failed })).toEqual([
+			{
+				severity: 'warning',
+				message: "GitHub Actions enablement could not be inspected for 'example/fork'.",
+			},
+			{
+				severity: 'warning',
+				message: "Repository variables could not be inspected for 'example/fork'.",
+			},
+			{
+				severity: 'warning',
+				message: "Repository secrets could not be inspected for 'example/fork'.",
+			},
+		]);
+	});
+});
 
 test('composes non-overlapping changes to the same workflow from independent patches', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-doctor-composed-'));
