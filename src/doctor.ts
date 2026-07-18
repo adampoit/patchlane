@@ -169,11 +169,9 @@ function workflowFiles(config: PatchlaneConfig, sourceSha: string | undefined, c
 		}
 
 		const head = git(['rev-parse', 'HEAD'], cwd).stdout;
-		let appliedWorkingTree = false;
 		for (const patchRef of config.patchRefs) {
 			const mergeBase = git(['merge-base', sourceSha, patchRef], cwd);
-			const resolvedPatch = git(['rev-parse', `${patchRef}^{commit}`], cwd);
-			if (mergeBase.status !== 0 || !mergeBase.stdout || resolvedPatch.status !== 0) continue;
+			if (mergeBase.status !== 0 || !mergeBase.stdout) continue;
 
 			const commits = git(['rev-list', '--no-merges', '--reverse', `${mergeBase.stdout}..${patchRef}`], cwd)
 				.stdout.split(/\r?\n/)
@@ -181,13 +179,8 @@ function workflowFiles(config: PatchlaneConfig, sourceSha: string | undefined, c
 			for (const commit of commits) {
 				if (!applyDiff(`${commit}^`, commit)) return workingTreeWorkflowFiles(cwd);
 			}
-
-			if (head === resolvedPatch.stdout) {
-				if (!applyWorkingTreeChanges(head)) return workingTreeWorkflowFiles(cwd);
-				appliedWorkingTree = true;
-			}
 		}
-		if (!appliedWorkingTree && !applyWorkingTreeChanges(head)) return workingTreeWorkflowFiles(cwd);
+		if (!applyWorkingTreeChanges(head)) return workingTreeWorkflowFiles(cwd);
 
 		const files = git(['ls-files', '.github/workflows'], cwd, { env: indexEnv })
 			.stdout.split(/\r?\n/)
