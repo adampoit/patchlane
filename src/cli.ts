@@ -172,6 +172,7 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 			upstreamOwner: args.upstreamOwner,
 			upstreamRepo: args.upstreamRepo,
 			patchRefs: args.patchRefs,
+			allowedWorkflows: config?.allowedWorkflows,
 			baseBranch: args.baseBranch,
 			source: args.source,
 			upstreamRef: args.upstreamRef,
@@ -209,6 +210,7 @@ cli.command('promote', 'Promote tested sync branch onto base branch')
 
 		runPromoteSync({
 			expectedSyncSha: args.expectedSyncSha,
+			allowedWorkflows: config?.allowedWorkflows,
 			baseBranch: args.baseBranch,
 			syncBranch: args.syncBranch,
 			originRemoteName: args.originRemoteName,

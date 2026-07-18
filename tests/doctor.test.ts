@@ -88,6 +88,7 @@ test('composes non-overlapping changes to the same workflow from independent pat
 				'source: branch:main',
 				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
 				'ciWorkflow: Product CI',
+				'allowedWorkflows: [ci.yml, promote-tested-sync.yml, sync-upstream.yml]',
 				'',
 			].join('\n'),
 		);
@@ -96,6 +97,27 @@ test('composes non-overlapping changes to the same workflow from independent pat
 		expect(report.ok).toBe(true);
 		expect(report.checks).not.toContainEqual(
 			expect.objectContaining({ message: expect.stringContaining('must run on pushes') }),
+		);
+
+		writeFileSync(
+			path.join(forkWork, '.patchlane.yml'),
+			[
+				'version: 1',
+				'upstream: example/upstream',
+				'source: branch:main',
+				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
+				'ciWorkflow: Product CI',
+				'allowedWorkflows: [missing.yml, promote-tested-sync.yml, sync-upstream.yml]',
+				'',
+			].join('\n'),
+		);
+		const deniedReport = runDoctor({ cwd: forkWork, json: true });
+		expect(deniedReport.ok).toBe(false);
+		expect(deniedReport.checks).toContainEqual(
+			expect.objectContaining({ severity: 'error', message: expect.stringContaining('ci.yml') }),
+		);
+		expect(deniedReport.checks).toContainEqual(
+			expect.objectContaining({ severity: 'error', message: expect.stringContaining('missing.yml') }),
 		);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });

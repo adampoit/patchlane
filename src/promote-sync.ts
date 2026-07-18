@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
 type RunOptions = {
 	allowFailure?: boolean;
@@ -82,6 +83,7 @@ export type PromoteSyncOptions = {
 	baseBranch?: string;
 	syncBranch?: string;
 	expectedSyncSha: string;
+	allowedWorkflows?: string[];
 	originRemoteName?: string;
 };
 
@@ -118,6 +120,25 @@ export function runPromoteSync(options: PromoteSyncOptions) {
 			].join('\n'),
 		);
 		fail(`Refusing to promote ${syncBranch}; expected tested SHA ${expectedSyncSha}.`);
+	}
+
+	const workflowViolations =
+		options.allowedWorkflows === undefined
+			? []
+			: validateWorkflowPolicy(options.allowedWorkflows, workflowFilesAtRef(process.cwd(), expectedSyncSha));
+	if (workflowViolations.length) {
+		writeOutput('promoted_sha', '');
+		writeOutput('status', 'workflow_policy');
+		writeSummary(
+			'## Integration promotion blocked',
+			[
+				`- Sync branch: \`${syncBranch}\``,
+				`- Tested SHA: \`${expectedSyncSha}\``,
+				'- Reason: the tested workflow tree violates allowedWorkflows.',
+				...workflowViolations.map(({ message }) => `- ${message}`),
+			].join('\n'),
+		);
+		fail(`Workflow policy violation at tested SHA ${expectedSyncSha}: ${workflowViolations[0]!.message}`);
 	}
 
 	const baseLease = git(['rev-parse', `refs/remotes/${originRemoteName}/${baseBranch}`]).stdout.trim();
@@ -168,6 +189,12 @@ function main() {
 		baseBranch: getEnv('BASE_BRANCH', 'main'),
 		syncBranch: getEnv('SYNC_BRANCH', 'sync/integration'),
 		expectedSyncSha: requireEnv('EXPECTED_SYNC_SHA'),
+		allowedWorkflows:
+			process.env.ALLOWED_WORKFLOWS === undefined
+				? undefined
+				: process.env.ALLOWED_WORKFLOWS.split(/\r?\n|,/)
+						.map((workflow) => workflow.trim())
+						.filter(Boolean),
 		originRemoteName: getEnv('ORIGIN_REMOTE_NAME', 'origin'),
 	});
 }

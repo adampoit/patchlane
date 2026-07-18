@@ -15,17 +15,24 @@ patchRefs:
     - patch/ci
     - patch/product
 ciWorkflow: CI
+allowedWorkflows:
+    - ci.yml
+    - promote-tested-sync.yml
+    - sync-upstream.yml
 ```
 
-| Field        | Required    | Description                                                       |
-| ------------ | ----------- | ----------------------------------------------------------------- |
-| `version`    | yes         | Configuration schema version; currently `1`                       |
-| `upstream`   | yes         | GitHub repository in `owner/repo` form                            |
-| `source`     | yes         | Explicit release or branch source                                 |
-| `baseBranch` | no          | Generated branch promoted after successful CI; defaults to `main` |
-| `syncBranch` | no          | Generated branch published for CI; defaults to `sync/integration` |
-| `patchRefs`  | yes         | Independent patch branches applied in order                       |
-| `ciWorkflow` | recommended | Exact existing CI workflow name used by `workflow_run`            |
+| Field              | Required    | Description                                                       |
+| ------------------ | ----------- | ----------------------------------------------------------------- |
+| `version`          | yes         | Configuration schema version; currently `1`                       |
+| `upstream`         | yes         | GitHub repository in `owner/repo` form                            |
+| `source`           | yes         | Explicit release or branch source                                 |
+| `baseBranch`       | no          | Generated branch promoted after successful CI; defaults to `main` |
+| `syncBranch`       | no          | Generated branch published for CI; defaults to `sync/integration` |
+| `patchRefs`        | yes         | Independent patch branches applied in order                       |
+| `ciWorkflow`       | recommended | Exact existing CI workflow name used by `workflow_run`            |
+| `allowedWorkflows` | no          | Exact workflow filenames permitted in the composed tree           |
+
+When `allowedWorkflows` is configured, doctor, every sync mode, and promotion reject unexpected or missing workflow files and dangling local reusable-workflow references. Sync validates after all patches are composed and before publishing `syncBranch`; promotion validates the exact `EXPECTED_SYNC_SHA`. Omitting the field preserves the existing behavior.
 
 Supported sources:
 
@@ -57,7 +64,7 @@ npx patchlane doctor
 npx patchlane doctor --json
 ```
 
-Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration, CI triggers, permissions, and bootstrap state without changing repository state.
+Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, permissions, and bootstrap state without changing repository state.
 
 ### Validate or publish a sync
 
@@ -134,4 +141,4 @@ Patchlane writes these outputs when `GITHUB_OUTPUT` is available:
 - `failed_commit`
 - `conflicted_paths`
 
-Sync status can be `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, `invalid_patch`, or `invalid_patch_base`.
+Sync status can be `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, `invalid_patch`, `invalid_patch_base`, or `workflow_policy`.

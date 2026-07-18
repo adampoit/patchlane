@@ -13,6 +13,7 @@ export type PatchlaneConfig = {
 	syncBranch: string;
 	patchRefs: string[];
 	ciWorkflow?: string;
+	allowedWorkflows?: string[];
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -58,6 +59,31 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 		throw new Error("Patchlane config field 'ciWorkflow' must be a non-empty string when provided.");
 	}
 
+	const rawAllowedWorkflows = value.allowedWorkflows;
+	let allowedWorkflows: string[] | undefined;
+	if (rawAllowedWorkflows !== undefined) {
+		if (!Array.isArray(rawAllowedWorkflows)) {
+			throw new Error("Patchlane config field 'allowedWorkflows' must be an array when provided.");
+		}
+		allowedWorkflows = rawAllowedWorkflows.map((workflow) => {
+			if (typeof workflow !== 'string' || !workflow.trim()) {
+				throw new Error(
+					"Patchlane config field 'allowedWorkflows' must contain only non-empty workflow filenames.",
+				);
+			}
+			const filename = workflow.trim();
+			if (path.basename(filename) !== filename || filename.includes('\\') || !/\.ya?ml$/.test(filename)) {
+				throw new Error(
+					"Patchlane config field 'allowedWorkflows' must contain filenames ending in .yml or .yaml.",
+				);
+			}
+			return filename;
+		});
+		if (new Set(allowedWorkflows).size !== allowedWorkflows.length) {
+			throw new Error("Patchlane config field 'allowedWorkflows' must not contain duplicate filenames.");
+		}
+	}
+
 	return {
 		upstreamOwner,
 		upstreamRepo,
@@ -69,6 +95,7 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 				: 'sync/integration',
 		patchRefs,
 		ciWorkflow: typeof ciWorkflow === 'string' ? ciWorkflow.trim() : undefined,
+		allowedWorkflows,
 	};
 }
 
@@ -81,6 +108,7 @@ export function serializePatchlaneConfig(config: PatchlaneConfig) {
 		syncBranch: config.syncBranch,
 		patchRefs: config.patchRefs,
 		...(config.ciWorkflow ? { ciWorkflow: config.ciWorkflow } : {}),
+		...(config.allowedWorkflows !== undefined ? { allowedWorkflows: config.allowedWorkflows } : {}),
 	});
 }
 

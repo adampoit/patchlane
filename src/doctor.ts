@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
 import { loadPatchlaneConfig, type PatchlaneConfig } from './config.js';
 import { parseUpstreamSource } from './upstream-source.js';
+import { validateWorkflowPolicy } from './workflow-policy.js';
 
 export type DoctorCheck = {
 	severity: 'error' | 'warning' | 'info';
@@ -187,7 +188,9 @@ function workflowFiles(config: PatchlaneConfig, sourceSha: string | undefined, c
 			.filter((file) => /\.ya?ml$/.test(file));
 		return files.flatMap((relativePath) => {
 			const content = git(['show', `:${relativePath}`], cwd, { env: indexEnv, trimOutput: false });
-			return content.status === 0 ? [{ file: path.basename(relativePath), content: content.stdout }] : [];
+			return content.status === 0
+				? [{ file: relativePath.slice('.github/workflows/'.length), content: content.stdout }]
+				: [];
 		});
 	} finally {
 		rmSync(tempDir, { force: true, recursive: true });
@@ -233,6 +236,9 @@ function hasWriteContents(workflow: Record<string, unknown>) {
 
 function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
 	const files = workflowFiles(config, sourceSha, cwd);
+	for (const violation of validateWorkflowPolicy(config.allowedWorkflows, files)) {
+		checks.push({ severity: 'error', message: violation.message });
+	}
 	const parsed = files.map((file) => ({ ...file, workflow: readWorkflow(file.content) }));
 	const sync = parsed.find((file) => file.file === 'sync-upstream.yml');
 	const promotion = parsed.find((file) => file.file === 'promote-tested-sync.yml');
