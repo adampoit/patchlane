@@ -178,6 +178,27 @@ test('reports a ready configuration and required bootstrap', () => {
 		expect(report.checks).toContainEqual(
 			expect.objectContaining({ severity: 'warning', message: expect.stringContaining('Initial bootstrap') }),
 		);
+
+		writeFileSync(
+			path.join(forkWork, '.patchlane.yml'),
+			[
+				'version: 1',
+				'upstream: example/upstream',
+				'source: branch:main',
+				'patchRefs: [patch/sync]',
+				'ciWorkflow: Existing CI',
+				'allowedWorkflows: [ci.yml]',
+				'notifications:',
+				'  githubIssues:',
+				'    events: [sync-failed, ci-failed]',
+				'',
+			].join('\n'),
+		);
+		const notificationReport = runDoctor({ cwd: forkWork, json: true });
+		expect(notificationReport.ok).toBe(false);
+		expect(notificationReport.checks).toContainEqual(
+			expect.objectContaining({ severity: 'error', message: expect.stringContaining('issues: write') }),
+		);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}

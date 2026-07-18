@@ -328,6 +328,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	) {
 		fail(`Upstream ref '${upstreamRef}' was not fetched from ${upstreamRemoteName}.`);
 	}
+	writeOutput('upstream_sha', git(['rev-parse', `${upstreamBase}^{commit}`]).stdout.trim());
 
 	const patchRefs = parsePatchRefs(patchRefsRaw);
 	if (!patchRefs.length) fail('PATCH_REFS did not contain any patch branch names.');

@@ -5,6 +5,17 @@ import { parseUpstreamSource } from './upstream-source.js';
 
 export const PATCHLANE_CONFIG_FILE = '.patchlane.yml';
 
+export const NOTIFICATION_EVENTS = ['sync-failed', 'ci-failed', 'promotion-failed'] as const;
+
+export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
+
+export type GithubIssueNotifications = {
+	assignees: string[];
+	labels: string[];
+	events: NotificationEvent[];
+	closeOnRecovery: boolean;
+};
+
 export type PatchlaneConfig = {
 	upstreamOwner: string;
 	upstreamRepo: string;
@@ -14,6 +25,9 @@ export type PatchlaneConfig = {
 	patchRefs: string[];
 	ciWorkflow?: string;
 	allowedWorkflows: string[];
+	notifications?: {
+		githubIssues: GithubIssueNotifications;
+	};
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -26,6 +40,53 @@ function requireString(config: Record<string, unknown>, key: string) {
 		throw new Error(`Patchlane config field '${key}' must be a non-empty string.`);
 	}
 	return value.trim();
+}
+
+function parseStringArray(value: unknown, field: string) {
+	if (!Array.isArray(value)) throw new Error(`Patchlane config field '${field}' must be an array.`);
+	const values = value.map((item) => {
+		if (typeof item !== 'string' || !item.trim()) {
+			throw new Error(`Patchlane config field '${field}' must contain only non-empty strings.`);
+		}
+		return item.trim();
+	});
+	if (new Set(values).size !== values.length) {
+		throw new Error(`Patchlane config field '${field}' must not contain duplicates.`);
+	}
+	return values;
+}
+
+function parseNotifications(value: unknown): PatchlaneConfig['notifications'] {
+	if (value === undefined) return undefined;
+	if (!isPlainObject(value) || !isPlainObject(value.githubIssues)) {
+		throw new Error("Patchlane config field 'notifications.githubIssues' must be a YAML object.");
+	}
+	const provider = value.githubIssues;
+	const assignees = parseStringArray(provider.assignees ?? [], 'notifications.githubIssues.assignees');
+	const labels = parseStringArray(provider.labels ?? [], 'notifications.githubIssues.labels');
+	const rawEvents = parseStringArray(provider.events, 'notifications.githubIssues.events');
+	if (!rawEvents.length) {
+		throw new Error("Patchlane config field 'notifications.githubIssues.events' must not be empty.");
+	}
+	const events = rawEvents.map((event) => {
+		if (!(NOTIFICATION_EVENTS as readonly string[]).includes(event)) {
+			throw new Error(
+				`Patchlane config field 'notifications.githubIssues.events' contains invalid event '${event}'.`,
+			);
+		}
+		return event as NotificationEvent;
+	});
+	if (provider.closeOnRecovery !== undefined && typeof provider.closeOnRecovery !== 'boolean') {
+		throw new Error("Patchlane config field 'notifications.githubIssues.closeOnRecovery' must be a boolean.");
+	}
+	return {
+		githubIssues: {
+			assignees,
+			labels,
+			events,
+			closeOnRecovery: provider.closeOnRecovery ?? false,
+		},
+	};
 }
 
 export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
@@ -73,6 +134,7 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 		patchRefs,
 		ciWorkflow: typeof ciWorkflow === 'string' ? ciWorkflow.trim() : undefined,
 		allowedWorkflows,
+		notifications: parseNotifications(value.notifications),
 	};
 }
 
@@ -112,6 +174,7 @@ export function serializePatchlaneConfig(config: PatchlaneConfig) {
 		patchRefs: config.patchRefs,
 		...(config.ciWorkflow ? { ciWorkflow: config.ciWorkflow } : {}),
 		allowedWorkflows: config.allowedWorkflows,
+		...(config.notifications ? { notifications: config.notifications } : {}),
 	});
 }
 

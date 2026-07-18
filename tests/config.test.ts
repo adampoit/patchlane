@@ -23,6 +23,41 @@ test('parses Patchlane configuration', () => {
 	});
 });
 
+test('parses GitHub issue notification configuration', () => {
+	const parsed = parsePatchlaneConfig({
+		version: 1,
+		upstream: 'example/upstream',
+		source: 'branch:main',
+		patchRefs: ['patch/sync'],
+		allowedWorkflows: ['ci.yml'],
+		notifications: {
+			githubIssues: {
+				assignees: ['adampoit'],
+				labels: ['patchlane', 'automation-failure'],
+				events: ['sync-failed', 'ci-failed', 'promotion-failed'],
+				closeOnRecovery: true,
+			},
+		},
+	});
+
+	expect(parsed.notifications?.githubIssues).toEqual({
+		assignees: ['adampoit'],
+		labels: ['patchlane', 'automation-failure'],
+		events: ['sync-failed', 'ci-failed', 'promotion-failed'],
+		closeOnRecovery: true,
+	});
+	expect(() =>
+		parsePatchlaneConfig({
+			version: 1,
+			upstream: 'example/upstream',
+			source: 'branch:main',
+			patchRefs: ['patch/sync'],
+			allowedWorkflows: ['ci.yml'],
+			notifications: { githubIssues: { events: ['unknown-event'] } },
+		}),
+	).toThrow(/invalid event 'unknown-event'/);
+});
+
 test('parses and validates allowed workflow filenames', () => {
 	expect(
 		parsePatchlaneConfig({
