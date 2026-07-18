@@ -89,6 +89,8 @@ npx patchlane bootstrap --wait
 
 Bootstrap is needed when the promotion workflow is not already present on the generated base branch. Existing Patchlane forks with active sync and promotion workflows can roll configuration changes forward through their normal tested sync flow.
 
+`bootstrap --wait` waits up to 10 minutes for GitHub Actions to expose the exact published SHA and reports progress once per minute. Use `--ci-timeout <seconds>` and `--ci-poll-interval <seconds>` to override the defaults. The equivalent environment variables are `PATCHLANE_CI_TIMEOUT_SECONDS` and `PATCHLANE_CI_POLL_INTERVAL_SECONDS`.
+
 ### Promote an exact SHA
 
 ```bash

@@ -13,7 +13,9 @@ vi.mock('../src/promote-sync.js', () => ({ runPromoteSync: vi.fn() }));
 vi.mock('../src/subprocess.js', () => ({ git: vi.fn(), run: vi.fn() }));
 
 const cwd = '/tmp/patchlane-bootstrap';
-const syncSha = '0123456789abcdef';
+const syncSha = '0123456789abcdef0123456789abcdef01234567';
+const syncRef = 'refs/heads/sync/integration';
+const repository = 'example/fork';
 const config: PatchlaneConfig = {
 	upstreamOwner: 'example',
 	upstreamRepo: 'upstream',
@@ -28,11 +30,25 @@ function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
 	return { status: 0, stdout: '', stderr: '', ...overrides };
 }
 
+function runs(...workflowRuns: Array<Record<string, unknown>>) {
+	return commandResult({ stdout: JSON.stringify({ total_count: workflowRuns.length, workflow_runs: workflowRuns }) });
+}
+
+function matchingRun(id = 42) {
+	return {
+		id,
+		name: config.ciWorkflow,
+		event: 'push',
+		head_branch: config.syncBranch,
+		head_sha: syncSha,
+	};
+}
+
 beforeEach(() => {
 	vi.resetAllMocks();
 	vi.mocked(loadPatchlaneConfig).mockReturnValue(config);
 	vi.mocked(runDoctor).mockReturnValue({ ok: true, checks: [] });
-	vi.mocked(git).mockReturnValue(syncSha);
+	vi.mocked(git).mockReturnValue(`${syncSha}\t${syncRef}`);
 	vi.mocked(run).mockReturnValue(commandResult());
 });
 
@@ -58,7 +74,7 @@ describe('bootstrapPatchlane', () => {
 		expect(runPromoteSync).not.toHaveBeenCalled();
 	});
 
-	test('publishes the sync branch after validation', async () => {
+	test('uses the published remote SHA after validation', async () => {
 		await expect(bootstrapPatchlane({ cwd, publish: true })).resolves.toEqual({
 			status: 'published',
 			syncSha,
@@ -69,58 +85,129 @@ describe('bootstrapPatchlane', () => {
 		const [publishOptions] = vi.mocked(runIntegrationSync).mock.calls[1];
 		expect(validationOptions).toEqual(expect.objectContaining({ dryRun: true }));
 		expect(publishOptions).not.toHaveProperty('dryRun');
-		expect(git).toHaveBeenCalledWith(['rev-parse', config.syncBranch], cwd);
+		expect(git).toHaveBeenCalledWith(['ls-remote', '--exit-code', 'origin', syncRef], cwd);
 		expect(run).not.toHaveBeenCalled();
 	});
 
-	test('polls until the CI run starts and promotes after it succeeds', async () => {
+	test('queries Actions directly until the exact CI run appears and then promotes', async () => {
 		vi.useFakeTimers();
 		vi.mocked(run)
-			.mockReturnValueOnce(commandResult())
-			.mockReturnValueOnce(commandResult({ stdout: '42' }))
+			.mockReturnValueOnce(commandResult({ stdout: repository }))
+			.mockReturnValueOnce(runs())
+			.mockReturnValueOnce(
+				runs(
+					{
+						id: 41,
+						name: 'Docs',
+						event: 'push',
+						head_branch: config.syncBranch,
+						head_sha: syncSha,
+					},
+					matchingRun(),
+				),
+			)
 			.mockReturnValueOnce(commandResult({ stdout: 'CI passed' }));
 
 		const result = bootstrapPatchlane({ cwd, publish: true, wait: true });
 		await vi.advanceTimersByTimeAsync(5_000);
 
 		await expect(result).resolves.toEqual({ status: 'promoted', syncSha, runId: '42' });
-		expect(run).toHaveBeenCalledTimes(3);
+		expect(run).toHaveBeenCalledTimes(4);
 		expect(run).toHaveBeenNthCalledWith(
 			1,
 			'gh',
-			expect.arrayContaining(['run', 'list', '--workflow', 'Fork CI', '--commit', syncSha]),
+			['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
 			cwd,
 		);
 		expect(run).toHaveBeenNthCalledWith(
 			2,
 			'gh',
-			expect.arrayContaining(['run', 'list', '--workflow', 'Fork CI', '--commit', syncSha]),
+			[
+				'api',
+				expect.stringContaining(
+					`repos/${repository}/actions/runs?head_sha=${syncSha}&branch=sync%2Fintegration&event=push`,
+				),
+			],
 			cwd,
 		);
-		expect(run).toHaveBeenNthCalledWith(3, 'gh', ['run', 'watch', '42', '--exit-status'], cwd);
+		expect(run).toHaveBeenNthCalledWith(4, 'gh', ['run', 'watch', '42', '--exit-status'], cwd);
 		expect(runPromoteSync).toHaveBeenCalledWith({
 			expectedSyncSha: syncSha,
 			baseBranch: config.baseBranch,
 			syncBranch: config.syncBranch,
+			originRemoteName: 'origin',
 		});
 	});
 
-	test('times out when no CI run starts', async () => {
+	test('performs a final lookup at the timeout deadline', async () => {
 		vi.useFakeTimers();
-		const result = bootstrapPatchlane({ cwd, publish: true, wait: true });
+		vi.mocked(run)
+			.mockReturnValueOnce(commandResult({ stdout: repository }))
+			.mockReturnValueOnce(runs())
+			.mockReturnValueOnce(runs())
+			.mockReturnValueOnce(runs(matchingRun()))
+			.mockReturnValueOnce(commandResult());
+
+		const result = bootstrapPatchlane({
+			cwd,
+			publish: true,
+			wait: true,
+			ciTimeoutSeconds: 10,
+			ciPollIntervalSeconds: 5,
+		});
+		await vi.advanceTimersByTimeAsync(10_000);
+
+		await expect(result).resolves.toEqual({ status: 'promoted', syncSha, runId: '42' });
+	});
+
+	test('times out with query details when no CI run starts', async () => {
+		vi.useFakeTimers();
+		vi.mocked(run)
+			.mockReturnValueOnce(commandResult({ stdout: repository }))
+			.mockReturnValue(runs());
+		const result = bootstrapPatchlane({
+			cwd,
+			publish: true,
+			wait: true,
+			ciTimeoutSeconds: 10,
+			ciPollIntervalSeconds: 5,
+		});
 		const rejection = expect(result).rejects.toThrow(
-			`Timed out waiting for '${config.ciWorkflow}' to start for ${syncSha}.`,
+			`Timed out after 10 seconds waiting for '${config.ciWorkflow}' to start.\n` +
+				`Repository: ${repository}\n` +
+				`Branch: ${config.syncBranch}\n` +
+				`Commit: ${syncSha}\n` +
+				'Event: push',
 		);
 
 		await vi.runAllTimersAsync();
 		await rejection;
-		expect(run).toHaveBeenCalledTimes(24);
+		expect(run).toHaveBeenCalledTimes(4);
 		expect(runPromoteSync).not.toHaveBeenCalled();
+	});
+
+	test('reports persistent GitHub lookup failures instead of hiding them', async () => {
+		vi.useFakeTimers();
+		vi.mocked(run)
+			.mockReturnValueOnce(commandResult({ stdout: repository }))
+			.mockReturnValue(commandResult({ status: 1, stderr: 'HTTP 503' }));
+		const result = bootstrapPatchlane({
+			cwd,
+			publish: true,
+			wait: true,
+			ciTimeoutSeconds: 5,
+			ciPollIntervalSeconds: 5,
+		});
+		const rejection = expect(result).rejects.toThrow('Last lookup error: HTTP 503');
+
+		await vi.runAllTimersAsync();
+		await rejection;
 	});
 
 	test('refuses to promote when CI fails', async () => {
 		vi.mocked(run)
-			.mockReturnValueOnce(commandResult({ stdout: '42' }))
+			.mockReturnValueOnce(commandResult({ stdout: repository }))
+			.mockReturnValueOnce(runs(matchingRun()))
 			.mockReturnValueOnce(commandResult({ status: 1, stderr: 'CI failed' }));
 
 		await expect(bootstrapPatchlane({ cwd, publish: true, wait: true })).rejects.toThrow(

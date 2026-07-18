@@ -72,13 +72,22 @@ cli.command('init', 'Create Patchlane config and workflow files')
 cli.command('bootstrap', 'Validate and publish the first generated sync branch')
 	.option('--publish', 'Publish the generated sync branch after validation')
 	.option('--wait', 'Publish, wait for CI, and perform the initial promotion')
+	.option('--ci-timeout <seconds>', 'Maximum time to wait for the CI run to appear', {
+		default: env('PATCHLANE_CI_TIMEOUT_SECONDS'),
+	})
+	.option('--ci-poll-interval <seconds>', 'Interval between CI run lookups', {
+		default: env('PATCHLANE_CI_POLL_INTERVAL_SECONDS'),
+	})
 	.action((args) => {
-		void bootstrapPatchlane({ publish: args.publish === true, wait: args.wait === true }).catch(
-			(error: unknown) => {
-				process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-				process.exit(1);
-			},
-		);
+		void bootstrapPatchlane({
+			publish: args.publish === true,
+			wait: args.wait === true,
+			ciTimeoutSeconds: args.ciTimeout === undefined ? undefined : Number(args.ciTimeout),
+			ciPollIntervalSeconds: args.ciPollInterval === undefined ? undefined : Number(args.ciPollInterval),
+		}).catch((error: unknown) => {
+			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+			process.exit(1);
+		});
 	});
 
 cli.command('doctor', 'Check Patchlane configuration without changing repository state')
