@@ -78,7 +78,9 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 
 export function parseAllowedWorkflows(value: unknown) {
 	if (!Array.isArray(value)) {
-		throw new Error("Patchlane config field 'allowedWorkflows' must be an array.");
+		throw new Error(
+			"Patchlane config field 'allowedWorkflows' must be an array. See https://github.com/adampoit/patchlane/blob/main/docs/migrations.md for migration instructions.",
+		);
 	}
 	const allowedWorkflows = value.map((workflow) => {
 		if (typeof workflow !== 'string' || !workflow.trim()) {

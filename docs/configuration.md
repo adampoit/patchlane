@@ -32,6 +32,8 @@ allowedWorkflows:
 
 Patchlane implicitly adds its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows to the allowlist. Configure only repository-specific workflows such as CI; use an empty list when no additional workflows are expected. Doctor, every sync mode, and promotion reject unexpected or missing workflow files and dangling local reusable-workflow references. Sync validates after all patches are composed and before publishing `syncBranch`; promotion validates the exact `EXPECTED_SYNC_SHA`.
 
+Existing configurations that do not define this field must follow the [vNext migration instructions](migrations.md#vnext).
+
 Supported sources:
 
 - `release:latest`

@@ -18,7 +18,7 @@ Then ask your coding agent:
 
 The setup skill inspects the repository, asks which upstream release or branch to track, and shows its complete plan before pushing or rewriting branches. It then creates the patch stack, validates it, and guides the first tested promotion.
 
-Prefer to configure it yourself? Follow the [manual setup guide](docs/manual-setup.md). Already using an earlier Patchlane workflow? Use the [0.4 migration guide](docs/migrating-to-0.4.md).
+Prefer to configure it yourself? Follow the [manual setup guide](docs/manual-setup.md). Already using an earlier Patchlane version? Use the [migration guide](docs/migrations.md).
 
 ## How It Works
 
@@ -33,7 +33,7 @@ The promoted base and sync branches are generated output. Fork-owned changes bel
 ## Documentation
 
 - [Manual setup](docs/manual-setup.md)
-- [Migrating to Patchlane 0.4](docs/migrating-to-0.4.md)
+- [Migration guide](docs/migrations.md)
 - [Configuration and command reference](docs/configuration.md)
 
 ## Development
