@@ -154,7 +154,7 @@ test('reports a ready configuration and required bootstrap', () => {
 
 		writeFileSync(
 			path.join(forkWork, '.patchlane.yml'),
-			'version: 1\nupstream: example/upstream\nsource: branch:main\npatchRefs: [patch/sync]\nciWorkflow: Existing CI\n',
+			'version: 1\nupstream: example/upstream\nsource: branch:main\npatchRefs: [patch/sync]\nciWorkflow: Existing CI\nallowedWorkflows: [ci.yml]\n',
 		);
 		const workflowDir = path.join(forkWork, '.github', 'workflows');
 		mkdirSync(workflowDir, { recursive: true });

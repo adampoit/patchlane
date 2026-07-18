@@ -9,6 +9,7 @@ test('parses Patchlane configuration', () => {
 			source: 'release:latest',
 			patchRefs: ['patch/sync', 'patch/ci'],
 			ciWorkflow: 'CI',
+			allowedWorkflows: ['ci.yml'],
 		}),
 	).toEqual({
 		upstreamOwner: 'example',
@@ -18,7 +19,7 @@ test('parses Patchlane configuration', () => {
 		syncBranch: 'sync/integration',
 		patchRefs: ['patch/sync', 'patch/ci'],
 		ciWorkflow: 'CI',
-		allowedWorkflows: undefined,
+		allowedWorkflows: ['ci.yml'],
 	});
 });
 
@@ -46,6 +47,14 @@ test('parses and validates allowed workflow filenames', () => {
 
 test('rejects incomplete Patchlane configuration', () => {
 	expect(() => parsePatchlaneConfig({ version: 1 })).toThrow(/upstream/);
+	expect(() =>
+		parsePatchlaneConfig({
+			version: 1,
+			upstream: 'example/upstream',
+			source: 'branch:main',
+			patchRefs: ['patch/sync'],
+		}),
+	).toThrow(/allowedWorkflows/);
 	expect(() =>
 		parsePatchlaneConfig({
 			version: 1,

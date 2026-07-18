@@ -64,6 +64,7 @@ test('sync skip-push flags do not publish the generated branch', () => {
 				'patchRefs:',
 				'  - patch/product',
 				'ciWorkflow: Existing CI',
+				'allowedWorkflows: [ci.yml]',
 				'',
 			].join('\n'),
 		);
@@ -78,6 +79,9 @@ test('sync skip-push flags do not publish the generated branch', () => {
 			path.join(workflowDir, 'promote-tested-sync.yml'),
 			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
 		);
+		git(['add', '.patchlane.yml', '.github/workflows'], forkWork);
+		git(['commit', '-m', 'Configure Patchlane'], forkWork);
+		git(['push', 'origin', 'patch/product'], forkWork);
 
 		const result = run('node', [cliPath, 'sync', `--upstream-remote-url=${upstreamBare}`, '--skip-push'], forkWork);
 

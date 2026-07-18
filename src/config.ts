@@ -13,7 +13,7 @@ export type PatchlaneConfig = {
 	syncBranch: string;
 	patchRefs: string[];
 	ciWorkflow?: string;
-	allowedWorkflows?: string[];
+	allowedWorkflows: string[];
 };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -59,30 +59,7 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 		throw new Error("Patchlane config field 'ciWorkflow' must be a non-empty string when provided.");
 	}
 
-	const rawAllowedWorkflows = value.allowedWorkflows;
-	let allowedWorkflows: string[] | undefined;
-	if (rawAllowedWorkflows !== undefined) {
-		if (!Array.isArray(rawAllowedWorkflows)) {
-			throw new Error("Patchlane config field 'allowedWorkflows' must be an array when provided.");
-		}
-		allowedWorkflows = rawAllowedWorkflows.map((workflow) => {
-			if (typeof workflow !== 'string' || !workflow.trim()) {
-				throw new Error(
-					"Patchlane config field 'allowedWorkflows' must contain only non-empty workflow filenames.",
-				);
-			}
-			const filename = workflow.trim();
-			if (path.basename(filename) !== filename || filename.includes('\\') || !/\.ya?ml$/.test(filename)) {
-				throw new Error(
-					"Patchlane config field 'allowedWorkflows' must contain filenames ending in .yml or .yaml.",
-				);
-			}
-			return filename;
-		});
-		if (new Set(allowedWorkflows).size !== allowedWorkflows.length) {
-			throw new Error("Patchlane config field 'allowedWorkflows' must not contain duplicate filenames.");
-		}
-	}
+	const allowedWorkflows = parseAllowedWorkflows(value.allowedWorkflows);
 
 	return {
 		upstreamOwner,
@@ -99,6 +76,30 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 	};
 }
 
+export function parseAllowedWorkflows(value: unknown) {
+	if (!Array.isArray(value)) {
+		throw new Error("Patchlane config field 'allowedWorkflows' must be an array.");
+	}
+	const allowedWorkflows = value.map((workflow) => {
+		if (typeof workflow !== 'string' || !workflow.trim()) {
+			throw new Error(
+				"Patchlane config field 'allowedWorkflows' must contain only non-empty workflow filenames.",
+			);
+		}
+		const filename = workflow.trim();
+		if (path.basename(filename) !== filename || filename.includes('\\') || !/\.ya?ml$/.test(filename)) {
+			throw new Error(
+				"Patchlane config field 'allowedWorkflows' must contain filenames ending in .yml or .yaml.",
+			);
+		}
+		return filename;
+	});
+	if (new Set(allowedWorkflows).size !== allowedWorkflows.length) {
+		throw new Error("Patchlane config field 'allowedWorkflows' must not contain duplicate filenames.");
+	}
+	return allowedWorkflows;
+}
+
 export function serializePatchlaneConfig(config: PatchlaneConfig) {
 	return stringify({
 		version: 1,
@@ -108,7 +109,7 @@ export function serializePatchlaneConfig(config: PatchlaneConfig) {
 		syncBranch: config.syncBranch,
 		patchRefs: config.patchRefs,
 		...(config.ciWorkflow ? { ciWorkflow: config.ciWorkflow } : {}),
-		...(config.allowedWorkflows !== undefined ? { allowedWorkflows: config.allowedWorkflows } : {}),
+		allowedWorkflows: config.allowedWorkflows,
 	});
 }
 

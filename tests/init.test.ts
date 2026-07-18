@@ -31,11 +31,14 @@ test('initializes config and pinned workflows from repository conventions', () =
 			upstreamRepo: 'upstream',
 			source: 'release:latest',
 			ciWorkflow: 'Existing CI',
+			allowedWorkflows: ['ci.yml'],
 		});
 		const configFile = parse(readFileSync(path.join(tempRoot, '.patchlane.yml'), 'utf8')) as {
 			patchRefs: string[];
+			allowedWorkflows: string[];
 		};
 		expect(configFile.patchRefs).toEqual(['patch/sync', 'patch/ci', 'patch/product']);
+		expect(configFile.allowedWorkflows).toEqual(['ci.yml']);
 
 		const { version } = JSON.parse(
 			readFileSync(path.resolve(import.meta.dirname, '..', 'package.json'), 'utf8'),

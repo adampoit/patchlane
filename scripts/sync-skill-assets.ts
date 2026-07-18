@@ -20,6 +20,7 @@ const exampleConfig: PatchlaneConfig = {
 	syncBranch: 'sync/integration',
 	patchRefs: ['patch/sync', 'patch/ci'],
 	ciWorkflow: 'Fork CI',
+	allowedWorkflows: ['fork-ci.yml'],
 };
 
 const prettierOptions = {

@@ -51,6 +51,7 @@ cli.command('init', 'Create Patchlane config and workflow files')
 	.option('--base-branch <branch>', 'Fork branch promoted later', { default: 'main' })
 	.option('--sync-branch <branch>', 'Published generated branch name', { default: 'sync/integration' })
 	.option('--ci-workflow <name>', 'Existing CI workflow name used by workflow_run')
+	.option('--allowed-workflows <files>', 'Comma-separated repository workflow filenames')
 	.option('--force', 'Replace existing Patchlane config and workflow files')
 	.action((args) => {
 		try {
@@ -61,6 +62,7 @@ cli.command('init', 'Create Patchlane config and workflow files')
 				baseBranch: args.baseBranch,
 				syncBranch: args.syncBranch,
 				ciWorkflow: args.ciWorkflow,
+				allowedWorkflows: args.allowedWorkflows,
 				force: args.force === true,
 			});
 		} catch (error) {
