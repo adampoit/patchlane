@@ -37,6 +37,13 @@ test('renders failure and recovery notifications with minimal permissions', () =
 	expect(promotion).toContain('notify --event=promotion-failed --recovered');
 });
 
+test('escapes the sync branch in GitHub Actions expressions', () => {
+	const promotion = renderPromotionWorkflow({ ...config, syncBranch: "sync/' || true || 'integration" }, '1.2.3');
+	const escapedCondition = "github.event.workflow_run.head_branch == 'sync/'' || true || ''integration'";
+	expect(promotion.split(escapedCondition)).toHaveLength(3);
+	expect(promotion).not.toContain("head_branch == 'sync/' || true");
+});
+
 test('does not add notification permissions or steps when notifications are omitted', () => {
 	const withoutNotifications = { ...config, notifications: undefined };
 	expect(renderSyncWorkflow(withoutNotifications, '1.2.3')).not.toContain('issues: write');

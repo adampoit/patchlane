@@ -13,6 +13,10 @@ function permissions(needsIssues: boolean) {
   contents: write${needsIssues ? '\n  issues: write' : ''}`;
 }
 
+function githubExpressionString(value: string) {
+	return value.replaceAll("'", "''");
+}
+
 export function renderSyncWorkflow(config: PatchlaneConfig, packageVersion: string) {
 	const notifyFailures = hasEvent(config, 'sync-failed');
 	const notifyRecovery = notifyFailures && closeOnRecovery(config);
@@ -100,6 +104,7 @@ export function renderPromotionWorkflow(config: PatchlaneConfig, packageVersion:
 	const notifyCiRecovery = notifyCi && closeOnRecovery(config);
 	const notifyPromotionRecovery = notifyPromotion && closeOnRecovery(config);
 	const needsIssues = notifyCi || notifyPromotion;
+	const syncBranch = githubExpressionString(config.syncBranch);
 	return `name: Promote Tested Sync Branch
 
 on:
@@ -113,7 +118,7 @@ jobs:
   promote:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == '${config.syncBranch}'
+      github.event.workflow_run.head_branch == '${syncBranch}'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -173,7 +178,7 @@ ${
   notify-ci-failure:
     if: >-
       github.event.workflow_run.conclusion != 'success' &&
-      github.event.workflow_run.head_branch == '${config.syncBranch}'
+      github.event.workflow_run.head_branch == '${syncBranch}'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
