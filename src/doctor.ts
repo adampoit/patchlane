@@ -6,6 +6,11 @@ import { parse } from 'yaml';
 import { loadPatchlaneConfig, type PatchlaneConfig } from './config.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy } from './workflow-policy.js';
+import {
+	GITHUB_APP_CLIENT_ID_VARIABLE,
+	GITHUB_APP_PRIVATE_KEY_SECRET,
+	GITHUB_APP_TOKEN_STEP_ID,
+} from './workflow-templates.js';
 
 export type DoctorCheck = {
 	severity: 'error' | 'warning' | 'info';
@@ -229,14 +234,83 @@ function configuredBranches(workflow: Record<string, unknown>) {
 	return Array.isArray(branches) ? branches.filter((branch): branch is string => typeof branch === 'string') : [];
 }
 
-function hasWritePermission(workflow: Record<string, unknown>, permission: string) {
-	const permissions = workflow.permissions;
-	return (
-		typeof permissions === 'object' &&
-		permissions !== null &&
-		!Array.isArray(permissions) &&
-		(permissions as Record<string, unknown>)[permission] === 'write'
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function workflowJob(workflow: Record<string, unknown>, jobName: string) {
+	return objectValue(objectValue(workflow.jobs)?.[jobName]);
+}
+
+function jobSteps(job: Record<string, unknown> | undefined) {
+	const steps = job?.steps;
+	return Array.isArray(steps) ? steps.flatMap((step) => (objectValue(step) ? [objectValue(step)!] : [])) : [];
+}
+
+export function inspectAuthenticatedJob(
+	workflowFile: string,
+	jobName: string,
+	job: Record<string, unknown> | undefined,
+	requirements: { contents: 'read' | 'write'; workflows?: boolean; issues?: boolean },
+	checks: DoctorCheck[],
+) {
+	if (!job) {
+		checks.push({ severity: 'error', message: `${workflowFile} must define the '${jobName}' job.` });
+		return;
+	}
+	const steps = jobSteps(job);
+	const tokenStep = steps.find(
+		(step) =>
+			step.id === GITHUB_APP_TOKEN_STEP_ID &&
+			typeof step.uses === 'string' &&
+			step.uses.startsWith('actions/create-github-app-token@'),
 	);
+	const tokenWith = objectValue(tokenStep?.with);
+	const expectedToken = `\${{ steps.${GITHUB_APP_TOKEN_STEP_ID}.outputs.token }}`;
+	const expectedClientId = `\${{ vars.${GITHUB_APP_CLIENT_ID_VARIABLE} }}`;
+	const expectedPrivateKey = `\${{ secrets.${GITHUB_APP_PRIVATE_KEY_SECRET} }}`;
+	if (
+		!tokenWith ||
+		tokenWith['client-id'] !== expectedClientId ||
+		tokenWith['private-key'] !== expectedPrivateKey ||
+		tokenWith['permission-contents'] !== requirements.contents ||
+		(requirements.workflows && tokenWith['permission-workflows'] !== 'write') ||
+		(requirements.issues && tokenWith['permission-issues'] !== 'write')
+	) {
+		const permissions = [
+			`contents: ${requirements.contents}`,
+			requirements.workflows ? 'workflows: write' : '',
+			requirements.issues ? 'issues: write' : '',
+		]
+			.filter(Boolean)
+			.join(', ');
+		checks.push({
+			severity: 'error',
+			message: `${workflowFile} job '${jobName}' must create a Patchlane GitHub App token with ${permissions}.`,
+		});
+	}
+
+	const checkout = steps.find((step) => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'));
+	if (objectValue(checkout?.with)?.token !== expectedToken) {
+		checks.push({
+			severity: 'error',
+			message: `${workflowFile} job '${jobName}' must check out with the Patchlane GitHub App token.`,
+		});
+	}
+
+	for (const step of steps.filter(
+		(step) => typeof step.run === 'string' && /\bpatchlane(?:@[^\s]+)?\s+(?:sync|promote|notify)\b/.test(step.run),
+	)) {
+		if (objectValue(step.env)?.GH_TOKEN !== expectedToken) {
+			checks.push({
+				severity: 'error',
+				message: `${workflowFile} job '${jobName}' must pass the Patchlane GitHub App token as GH_TOKEN.`,
+			});
+			break;
+		}
+	}
 }
 
 function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
@@ -249,37 +323,50 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 	const promotion = parsed.find((file) => file.file === 'promote-tested-sync.yml');
 	const ci = parsed.find((file) => workflowName(file.workflow) === config.ciWorkflow);
 
+	const syncNotifications = config.notifications?.githubIssues.events.includes('sync-failed') ?? false;
+	const ciNotifications = config.notifications?.githubIssues.events.includes('ci-failed') ?? false;
+	const promotionNotifications = config.notifications?.githubIssues.events.includes('promotion-failed') ?? false;
 	if (!sync?.workflow) checks.push({ severity: 'error', message: 'Missing .github/workflows/sync-upstream.yml.' });
 	else {
-		if (!hasWritePermission(sync.workflow, 'contents')) {
-			checks.push({ severity: 'error', message: 'The sync workflow must grant contents: write.' });
-		}
-		if (
-			config.notifications?.githubIssues.events.includes('sync-failed') &&
-			!hasWritePermission(sync.workflow, 'issues')
-		) {
+		inspectAuthenticatedJob(
+			'.github/workflows/sync-upstream.yml',
+			'fork-sync',
+			workflowJob(sync.workflow, 'fork-sync'),
+			{ contents: 'write', workflows: true, issues: syncNotifications },
+			checks,
+		);
+		const workflowDispatch = objectValue(eventConfig(sync.workflow, 'workflow_dispatch'));
+		if (!objectValue(workflowDispatch?.inputs)?.verification_id) {
 			checks.push({
 				severity: 'error',
-				message: 'The sync workflow must grant issues: write for GitHub issue notifications.',
+				message: '.github/workflows/sync-upstream.yml must expose the verification_id dispatch input.',
 			});
 		}
 	}
 	if (!promotion?.workflow) {
 		checks.push({ severity: 'error', message: 'Missing .github/workflows/promote-tested-sync.yml.' });
 	} else {
-		if (!hasWritePermission(promotion.workflow, 'contents')) {
-			checks.push({ severity: 'error', message: 'The promotion workflow must grant contents: write.' });
-		}
-		if (
-			config.notifications?.githubIssues.events.some((event) =>
-				['ci-failed', 'promotion-failed'].includes(event),
-			) &&
-			!hasWritePermission(promotion.workflow, 'issues')
-		) {
-			checks.push({
-				severity: 'error',
-				message: 'The promotion workflow must grant issues: write for GitHub issue notifications.',
-			});
+		inspectAuthenticatedJob(
+			'.github/workflows/promote-tested-sync.yml',
+			'promote',
+			workflowJob(promotion.workflow, 'promote'),
+			{
+				contents: 'write',
+				workflows: true,
+				issues:
+					promotionNotifications ||
+					(ciNotifications && (config.notifications?.githubIssues.closeOnRecovery ?? false)),
+			},
+			checks,
+		);
+		if (ciNotifications) {
+			inspectAuthenticatedJob(
+				'.github/workflows/promote-tested-sync.yml',
+				'notify-ci-failure',
+				workflowJob(promotion.workflow, 'notify-ci-failure'),
+				{ contents: 'read', issues: true },
+				checks,
+			);
 		}
 		const workflowRun = eventConfig(promotion.workflow, 'workflow_run');
 		const workflows =
@@ -345,6 +432,65 @@ function inspectPatchRefs(config: PatchlaneConfig, sourceSha: string | undefined
 	}
 }
 
+export function inspectGitHubAutomation(
+	repository: string | undefined,
+	cwd: string,
+	checks: DoctorCheck[],
+	runCommand: typeof run = run,
+) {
+	if (!repository) return;
+
+	const actions = runCommand('gh', ['api', `repos/${repository}/actions/permissions`, '--jq', '.enabled'], cwd);
+	if (actions.status === 0) {
+		if (actions.stdout !== 'true') {
+			checks.push({ severity: 'error', message: `GitHub Actions is disabled for '${repository}'.` });
+		}
+	} else {
+		checks.push({
+			severity: 'warning',
+			message: `GitHub Actions enablement could not be inspected for '${repository}'.`,
+		});
+	}
+
+	const variables = runCommand(
+		'gh',
+		['api', '--paginate', `repos/${repository}/actions/variables?per_page=100`, '--jq', '.variables[].name'],
+		cwd,
+	);
+	if (variables.status === 0) {
+		if (!variables.stdout.split(/\r?\n/).includes(GITHUB_APP_CLIENT_ID_VARIABLE)) {
+			checks.push({
+				severity: 'error',
+				message: `Repository variable '${GITHUB_APP_CLIENT_ID_VARIABLE}' is not configured for '${repository}'.`,
+			});
+		}
+	} else {
+		checks.push({
+			severity: 'warning',
+			message: `Repository variables could not be inspected for '${repository}'.`,
+		});
+	}
+
+	const secrets = runCommand(
+		'gh',
+		['api', '--paginate', `repos/${repository}/actions/secrets?per_page=100`, '--jq', '.secrets[].name'],
+		cwd,
+	);
+	if (secrets.status === 0) {
+		if (!secrets.stdout.split(/\r?\n/).includes(GITHUB_APP_PRIVATE_KEY_SECRET)) {
+			checks.push({
+				severity: 'error',
+				message: `Repository secret '${GITHUB_APP_PRIVATE_KEY_SECRET}' is not configured for '${repository}'.`,
+			});
+		}
+	} else {
+		checks.push({
+			severity: 'warning',
+			message: `Repository secrets could not be inspected for '${repository}'.`,
+		});
+	}
+}
+
 function inspectNotificationAssignees(config: PatchlaneConfig, cwd: string, checks: DoctorCheck[]) {
 	const assignees = config.notifications?.githubIssues.assignees ?? [];
 	const repository = githubRepository(remoteUrl(cwd, 'origin'));
@@ -391,6 +537,8 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 		checks.push({ severity: 'info', message: `Resolved ${config.source} to ${resolved.label} @ ${resolved.sha}.` });
 	inspectPatchRefs(config, resolved?.sha, cwd, checks);
 	inspectWorkflows(config, resolved?.sha, cwd, checks);
+	const repository = githubRepository(remoteUrl(cwd, 'origin'));
+	inspectGitHubAutomation(repository, cwd, checks);
 	inspectNotificationAssignees(config, cwd, checks);
 	inspectBootstrap(config, cwd, checks);
 

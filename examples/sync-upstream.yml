@@ -1,4 +1,5 @@
 name: Sync Upstream Integration
+run-name: ${{ inputs.verification_id && format('Verify Patchlane authentication ({0})', inputs.verification_id) || 'Sync Upstream Integration' }}
 
 on:
   schedule:
@@ -20,18 +21,31 @@ on:
         type: string
         required: false
         default: ''
+      verification_id:
+        description: Correlate a Patchlane authentication check run.
+        type: string
+        required: false
+        default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   fork-sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Create Patchlane token
+        id: patchlane-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PATCHLANE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PATCHLANE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.patchlane-token.outputs.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -40,6 +54,7 @@ jobs:
       - name: Run patchlane sync
         run: npx patchlane@0.4.1 sync
         env:
+          GH_TOKEN: ${{ steps.patchlane-token.outputs.token }}
           UPSTREAM_SOURCE: ${{ inputs.source }}
           PATCH_REFS: ${{ inputs.patch_refs }}
           NO_PUSH: ${{ inputs.no_push || false }}
