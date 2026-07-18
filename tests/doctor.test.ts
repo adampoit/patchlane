@@ -31,7 +31,7 @@ test('composes non-overlapping changes to the same workflow from independent pat
 		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream\n');
 		writeFileSync(
 			path.join(upstreamWorkflowDir, 'ci.yml'),
-			'name: Existing CI\non:\n  push:\n    branches: [feature]\n',
+			'name: Existing CI\nrun-name: Continuous integration\npermissions:\n  contents: read\nconcurrency:\n  group: continuous-integration\n  cancel-in-progress: true\non:\n  push:\n    branches: [feature]\n',
 		);
 		git(['add', '.'], upstreamWork);
 		git(['commit', '-m', 'Initial upstream'], upstreamWork);
@@ -58,7 +58,7 @@ test('composes non-overlapping changes to the same workflow from independent pat
 		git(['switch', '-c', 'patch/ci', 'upstream/main'], forkWork);
 		writeFileSync(
 			path.join(workflowDir, 'ci.yml'),
-			'name: Existing CI\non:\n  push:\n    branches: [main, sync/integration]\n',
+			'name: Existing CI\nrun-name: Continuous integration\npermissions:\n  contents: read\nconcurrency:\n  group: continuous-integration\n  cancel-in-progress: true\non:\n  push:\n    branches: [main, sync/integration]\n',
 		);
 		git(['add', '.github/workflows/ci.yml'], forkWork);
 		git(['commit', '-m', 'Run CI on integration branches'], forkWork);
@@ -73,10 +73,10 @@ test('composes non-overlapping changes to the same workflow from independent pat
 		git(['switch', '-c', 'patch/product-workflow', 'upstream/main'], forkWork);
 		writeFileSync(
 			path.join(workflowDir, 'ci.yml'),
-			'name: Product CI\non:\n  push:\n    branches: [feature]\nenv:\n  PRODUCT_MODE: enabled\n',
+			'name: Product CI\nrun-name: Continuous integration\npermissions:\n  contents: read\nconcurrency:\n  group: continuous-integration\n  cancel-in-progress: true\non:\n  push:\n    branches: [feature]\n',
 		);
 		git(['add', '.github/workflows/ci.yml'], forkWork);
-		git(['commit', '-m', 'Configure product CI environment'], forkWork);
+		git(['commit', '-m', 'Rename product CI workflow'], forkWork);
 		git(['push', 'origin', 'patch/product-workflow'], forkWork);
 
 		git(['switch', 'patch/sync'], forkWork);
