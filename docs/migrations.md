@@ -4,7 +4,7 @@ Follow the section for the version you are adopting. Migration notes are listed 
 
 ## vNext
 
-vNext requires every version-1 `.patchlane.yml` file to define `allowedWorkflows`. Patchlane implicitly includes its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows, so list only repository-specific workflows.
+vNext requires every version-1 `.patchlane.yml` file to define `allowedWorkflows` and updates generated workflows to authenticate with a GitHub App. Patchlane implicitly includes its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows, so list only repository-specific workflows.
 
 ### 1. Inventory the composed workflow tree
 
@@ -43,7 +43,19 @@ allowedWorkflows:
 
 Use `allowedWorkflows: []` when the composed tree should contain only Patchlane's generated workflows. Add patches that delete unwanted upstream workflows rather than allowing them merely because they currently exist.
 
-### 3. Validate before rollout
+### 3. Configure GitHub App authentication
+
+Create or reuse a GitHub App installed on the fork with Contents read/write and Workflows write. Add Issues read/write when issue notifications are enabled. Configure its credentials using the standard names:
+
+```bash
+FORK=OWNER/REPOSITORY
+gh variable set PATCHLANE_APP_CLIENT_ID --repo "$FORK" --body "YOUR_APP_CLIENT_ID"
+gh secret set PATCHLANE_APP_PRIVATE_KEY --repo "$FORK" < /path/to/app-private-key.pem
+```
+
+Replace both generated workflow files with the vNext templates. Do not merely pass `github.token` as `GH_TOKEN`: that fixes API authentication, but pushes made by the built-in `GITHUB_TOKEN` do not start the required downstream workflow runs.
+
+### 4. Validate before rollout
 
 After pushing the updated patch refs, validate with the vNext package version selected for the migration:
 
@@ -54,7 +66,7 @@ npx patchlane@VERSION sync --dry-run
 
 Doctor should identify every unexpected or missing workflow by filename. The dry run validates the actual output after all configured patches are replayed without changing the local or remote sync branch.
 
-### 4. Roll out through a tested promotion
+### 5. Roll out through a tested promotion
 
 Update the pinned Patchlane version in the sync and promotion workflows as part of the same configuration patch. From that patch branch, use the new client for the first policy-enforced rebuild and promotion:
 
@@ -62,9 +74,13 @@ Update the pinned Patchlane version in the sync and promotion workflows as part 
 npx patchlane@VERSION bootstrap --wait
 ```
 
-This validates the allowlist before publishing `sync/integration`, waits for CI on the exact published SHA, revalidates that SHA, and then promotes it. Confirm afterward that the generated base contains the intended workflow set and that scheduled syncs use the new Patchlane version.
+This validates the allowlist before publishing `sync/integration`, waits for CI on the exact published SHA, revalidates that SHA, and then promotes it. Confirm afterward that the generated base contains the intended workflow set and that scheduled syncs use the new Patchlane version. Then validate the uploaded App credentials with a no-push workflow run:
 
-### 5. Optionally enable maintainer notifications
+```bash
+npx patchlane@VERSION verify-auth
+```
+
+### 6. Optionally enable maintainer notifications
 
 Failure notifications are opt-in. Existing configurations that omit `notifications` keep their current behavior and require no notification-specific migration.
 
@@ -87,8 +103,8 @@ notifications:
 
 Update both generated workflow files from the vNext templates in the same patch:
 
-- `sync-upstream.yml` must grant `issues: write`, report `sync-failed` after a failed sync, and optionally report recovery after success.
-- `promote-tested-sync.yml` must grant `issues: write`, report unsuccessful CI workflow runs, report failed promotions, and optionally report each recovery.
+- `sync-upstream.yml` must request `permission-issues: write` for its App token, report `sync-failed` after a failed sync, and optionally report recovery after success.
+- `promote-tested-sync.yml` must request `permission-issues: write` in jobs that report issues, report unsuccessful CI workflow runs, report failed promotions, and optionally report each recovery.
 
 Do not add only the configuration block: existing workflow files do not invoke `patchlane notify`, and `patchlane doctor` reports missing `issues: write` permissions. Keep notification steps on `continue-on-error` so a GitHub API or assignment failure cannot replace the original automation result.
 

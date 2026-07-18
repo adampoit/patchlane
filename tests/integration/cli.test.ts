@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import type { PatchlaneConfig } from '../../src/config.js';
+import { renderPromotionWorkflow, renderSyncWorkflow } from '../../src/workflow-templates.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 const cliPath = path.join(repoRoot, 'dist', 'cli.js');
@@ -74,10 +76,20 @@ test('sync skip-push flags do not publish the generated branch', () => {
 			path.join(workflowDir, 'ci.yml'),
 			'name: Existing CI\non:\n  push:\n    branches: [main, sync/integration]\n',
 		);
-		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'name: Sync\npermissions:\n  contents: write\n');
+		const workflowConfig: PatchlaneConfig = {
+			upstreamOwner: 'example',
+			upstreamRepo: 'upstream',
+			source: 'branch:main',
+			baseBranch: 'main',
+			syncBranch: 'sync/integration',
+			patchRefs: ['patch/product'],
+			ciWorkflow: 'Existing CI',
+			allowedWorkflows: ['ci.yml'],
+		};
+		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), renderSyncWorkflow(workflowConfig, '1.2.3'));
 		writeFileSync(
 			path.join(workflowDir, 'promote-tested-sync.yml'),
-			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
+			renderPromotionWorkflow(workflowConfig, '1.2.3'),
 		);
 		git(['add', '.patchlane.yml', '.github/workflows'], forkWork);
 		git(['commit', '-m', 'Configure Patchlane'], forkWork);

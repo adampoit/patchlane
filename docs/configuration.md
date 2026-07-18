@@ -48,7 +48,18 @@ Supported sources:
 
 CLI flags and environment variables override config values for one run. Legacy `UPSTREAM_OWNER`, `UPSTREAM_REPO`, `UPSTREAM_REF`, `RELEASE_SELECTOR`, `BASE_BRANCH`, `SYNC_BRANCH`, and `PATCH_REFS` variables remain supported for migration.
 
-GitHub issue notifications are optional. Patchlane keeps one issue per failure event, updates it on repeated failures, assigns configured users individually, and closes it after a successful run when `closeOnRecovery` is enabled. The generated workflows request `issues: write` only when they handle an enabled GitHub issue event. Notification API errors are warnings and do not replace the sync, CI, or promotion result.
+GitHub issue notifications are optional. Patchlane keeps one issue per failure event, updates it on repeated failures, assigns configured users individually, and closes it after a successful run when `closeOnRecovery` is enabled. The generated App tokens request `issues: write` only when they handle an enabled GitHub issue event. Notification API errors are warnings and do not replace the sync, CI, or promotion result.
+
+## GitHub App authentication
+
+The generated workflows require:
+
+- repository variable `PATCHLANE_APP_CLIENT_ID`
+- repository secret `PATCHLANE_APP_PRIVATE_KEY`
+
+The App installation must grant Contents read/write and Workflows write. Enable Issues read/write when GitHub issue notifications are configured. Patchlane requests these permissions explicitly when creating each short-lived token, passes the token to checkout and `gh` as `GH_TOKEN`, and leaves the built-in `GITHUB_TOKEN` read-only.
+
+A GitHub App or user token is required for pushes that must start another workflow. GitHub deliberately suppresses most workflow events caused by the built-in `GITHUB_TOKEN`; increasing its workflow permissions does not change that behavior. See [Manual setup](manual-setup.md) for App creation and repository configuration.
 
 ## Commands
 
@@ -72,7 +83,17 @@ npx patchlane doctor
 npx patchlane doctor --json
 ```
 
-Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, permissions, and bootstrap state without changing repository state.
+Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, App-token wiring, permissions, and bootstrap state without changing repository state. For GitHub origins it also attempts to inspect Actions enablement and the names—not values—of the expected repository variable and secret. Insufficient metadata access is reported as a warning.
+
+### Verify workflow authentication
+
+After the generated workflows are present on the base branch, run:
+
+```bash
+npx patchlane verify-auth
+```
+
+This dispatches `sync-upstream.yml` with `no_push=true`, finds the newly created run, and waits for it to finish. A successful run validates the uploaded App key, installation, requested permissions, API access, authenticated checkout, and Patchlane rebuild without changing a branch. Use `--timeout <seconds>` and `--poll-interval <seconds>` to override the 60-second discovery timeout and 2-second polling interval. The equivalent environment variables are `PATCHLANE_AUTH_TIMEOUT_SECONDS` and `PATCHLANE_AUTH_POLL_INTERVAL_SECONDS`.
 
 ### Validate or publish a sync
 

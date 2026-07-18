@@ -4,7 +4,27 @@ This walkthrough configures an existing GitHub fork. You need Node.js 22+, `git`
 
 Already using an earlier Patchlane version? Follow the [migration guide](migrations.md) instead.
 
-## 1. Choose the upstream source
+## 1. Configure GitHub App authentication
+
+Patchlane must push as a GitHub App so pushes to `sync/integration` and the promoted base branch trigger their configured workflows. GitHub suppresses most workflow events caused by the built-in `GITHUB_TOKEN`, so granting that token `contents: write` is not sufficient.
+
+Create or reuse a GitHub App, install it on the fork, and grant these repository permissions:
+
+- **Contents: read and write**
+- **Workflows: write**
+- **Issues: read and write** only when GitHub issue notifications are enabled
+
+The App does not need Actions write permission. Disable webhooks unless the App has another use that requires them. Record its Client ID and generate a private key, then configure the repository without printing the private key:
+
+```bash
+FORK=OWNER/REPOSITORY
+gh variable set PATCHLANE_APP_CLIENT_ID --repo "$FORK" --body "YOUR_APP_CLIENT_ID"
+gh secret set PATCHLANE_APP_PRIVATE_KEY --repo "$FORK" < /path/to/app-private-key.pem
+```
+
+The generated workflows use `actions/create-github-app-token` to request only the permissions needed by each job. Token creation fails if the App is not installed on the fork or lacks a requested permission.
+
+## 2. Choose the upstream source
 
 Add the upstream remote if needed:
 
@@ -32,7 +52,7 @@ git fetch upstream main
 
 Keep `SOURCE_REF` unchanged for the remaining steps. Every patch branch must start independently from this commit.
 
-## 2. Create the Patchlane patch
+## 3. Create the Patchlane patch
 
 Find the exact `name:` of the existing CI workflow, then create `patch/sync`:
 
@@ -52,7 +72,7 @@ git push -u origin patch/sync
 
 Replace `CI` with the existing workflow's exact name. Do not rename the workflow just for Patchlane.
 
-## 3. Make CI test generated syncs
+## 4. Make CI test generated syncs
 
 Create `patch/ci` from the same source—not from `patch/sync`:
 
@@ -79,7 +99,7 @@ git commit -m "Run fork CI on Patchlane syncs"
 git push -u origin patch/ci
 ```
 
-## 4. Validate
+## 5. Validate
 
 Return to the branch containing `.patchlane.yml`:
 
@@ -89,9 +109,9 @@ npx patchlane doctor
 npx patchlane sync --dry-run
 ```
 
-`doctor` should have no errors. A bootstrap warning is expected because the workflows are not on the generated base branch yet.
+`doctor` should have no errors. It checks the generated App-token wiring and, when your local `gh` credentials permit it, confirms that Actions is enabled and the expected repository variable and secret exist. GitHub does not expose secret values, so this cannot prove that the uploaded private key is valid. A bootstrap warning is expected because the workflows are not on the generated base branch yet.
 
-## 5. Bootstrap the first promotion
+## 6. Bootstrap the first promotion
 
 Validate once more without publishing:
 
@@ -105,7 +125,13 @@ Then publish, wait for CI, and promote the exact successful SHA:
 npx patchlane bootstrap --wait
 ```
 
-After this succeeds, scheduled syncs and automatic promotions are active.
+After this succeeds, run the post-bootstrap authentication check:
+
+```bash
+npx patchlane verify-auth
+```
+
+This dispatches the sync workflow with `no_push=true`, waits for it, and fails if the App credentials, installation, requested permissions, API access, checkout, or rebuild are invalid. It does not change any branches. After it succeeds, scheduled syncs and automatic promotions are active.
 
 ## Adding product patches
 

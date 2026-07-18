@@ -4,6 +4,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runDoctor } from '../src/doctor.js';
+import type { PatchlaneConfig } from '../src/config.js';
+import { renderPromotionWorkflow, renderSyncWorkflow } from '../src/workflow-templates.js';
+
+function workflowConfig(ciWorkflow: string): PatchlaneConfig {
+	return {
+		upstreamOwner: 'example',
+		upstreamRepo: 'upstream',
+		source: 'branch:main',
+		baseBranch: 'main',
+		syncBranch: 'sync/integration',
+		patchRefs: ['patch/sync'],
+		ciWorkflow,
+		allowedWorkflows: ['ci.yml'],
+	};
+}
 
 function git(args: string[], cwd: string) {
 	const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -46,10 +61,13 @@ test('composes non-overlapping changes to the same workflow from independent pat
 
 		git(['switch', '-c', 'patch/sync', 'upstream/main'], forkWork);
 		const workflowDir = path.join(forkWork, '.github', 'workflows');
-		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'name: Sync\npermissions:\n  contents: write\n');
+		writeFileSync(
+			path.join(workflowDir, 'sync-upstream.yml'),
+			renderSyncWorkflow(workflowConfig('Product CI'), '1.2.3'),
+		);
 		writeFileSync(
 			path.join(workflowDir, 'promote-tested-sync.yml'),
-			'name: Promote\non:\n  workflow_run:\n    workflows: [Product CI]\npermissions:\n  contents: write\n',
+			renderPromotionWorkflow(workflowConfig('Product CI'), '1.2.3'),
 		);
 		git(['add', '.github/workflows'], forkWork);
 		git(['commit', '-m', 'Add sync workflows'], forkWork);
@@ -162,10 +180,13 @@ test('reports a ready configuration and required bootstrap', () => {
 			path.join(workflowDir, 'ci.yml'),
 			'name: Existing CI\non:\n  push:\n    branches: [main, sync/integration]\n',
 		);
-		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'name: Sync\npermissions:\n  contents: write\n');
+		writeFileSync(
+			path.join(workflowDir, 'sync-upstream.yml'),
+			renderSyncWorkflow(workflowConfig('Existing CI'), '1.2.3'),
+		);
 		writeFileSync(
 			path.join(workflowDir, 'promote-tested-sync.yml'),
-			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
+			renderPromotionWorkflow(workflowConfig('Existing CI'), '1.2.3'),
 		);
 
 		git(['remote', 'set-url', 'upstream', upstreamBare], forkWork);

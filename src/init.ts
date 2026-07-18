@@ -140,6 +140,7 @@ export function initializePatchlane(options: InitOptions = {}) {
 			`Patch order: ${config.patchRefs.join(', ')}`,
 			`CI workflow: ${config.ciWorkflow}`,
 			`Allowed repository workflows: ${config.allowedWorkflows.join(', ') || '(none)'}`,
+			'Configure PATCHLANE_APP_CLIENT_ID and PATCHLANE_APP_PRIVATE_KEY in the fork repository.',
 			'Run `npx patchlane doctor` before publishing any branches.',
 		].join('\n') + '\n',
 	);
