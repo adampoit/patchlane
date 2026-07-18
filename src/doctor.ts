@@ -6,11 +6,7 @@ import { parse } from 'yaml';
 import { loadPatchlaneConfig, type PatchlaneConfig } from './config.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy } from './workflow-policy.js';
-import {
-	GITHUB_APP_CLIENT_ID_VARIABLE,
-	GITHUB_APP_PRIVATE_KEY_SECRET,
-	GITHUB_APP_TOKEN_STEP_ID,
-} from './workflow-templates.js';
+import { GITHUB_APP_CLIENT_ID_VARIABLE, GITHUB_APP_PRIVATE_KEY_SECRET } from './workflow-templates.js';
 
 export type DoctorCheck = {
 	severity: 'error' | 'warning' | 'info';
@@ -249,61 +245,87 @@ function jobSteps(job: Record<string, unknown> | undefined) {
 	return Array.isArray(steps) ? steps.flatMap((step) => (objectValue(step) ? [objectValue(step)!] : [])) : [];
 }
 
+type AuthenticationProvider = 'direct' | 'wrapper';
+
 export function inspectAuthenticatedJob(
 	workflowFile: string,
 	jobName: string,
 	job: Record<string, unknown> | undefined,
 	requirements: { contents: 'read' | 'write'; workflows?: boolean; issues?: boolean },
 	checks: DoctorCheck[],
-) {
+): AuthenticationProvider | undefined {
 	if (!job) {
 		checks.push({ severity: 'error', message: `${workflowFile} must define the '${jobName}' job.` });
-		return;
+		return undefined;
 	}
 	const steps = jobSteps(job);
-	const tokenStep = steps.find(
-		(step) =>
-			step.id === GITHUB_APP_TOKEN_STEP_ID &&
-			typeof step.uses === 'string' &&
-			step.uses.startsWith('actions/create-github-app-token@'),
-	);
-	const tokenWith = objectValue(tokenStep?.with);
-	const expectedToken = `\${{ steps.${GITHUB_APP_TOKEN_STEP_ID}.outputs.token }}`;
-	const expectedClientId = `\${{ vars.${GITHUB_APP_CLIENT_ID_VARIABLE} }}`;
-	const expectedPrivateKey = `\${{ secrets.${GITHUB_APP_PRIVATE_KEY_SECRET} }}`;
-	if (
-		!tokenWith ||
-		tokenWith['client-id'] !== expectedClientId ||
-		tokenWith['private-key'] !== expectedPrivateKey ||
-		tokenWith['permission-contents'] !== requirements.contents ||
-		(requirements.workflows && tokenWith['permission-workflows'] !== 'write') ||
-		(requirements.issues && tokenWith['permission-issues'] !== 'write')
-	) {
-		const permissions = [
-			`contents: ${requirements.contents}`,
-			requirements.workflows ? 'workflows: write' : '',
-			requirements.issues ? 'issues: write' : '',
-		]
-			.filter(Boolean)
-			.join(', ');
+	const checkout = steps.find((step) => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'));
+	const checkoutToken = objectValue(checkout?.with)?.token;
+	const tokenExpression =
+		typeof checkoutToken === 'string'
+			? checkoutToken.match(/^\$\{\{\s*steps\.([A-Za-z_][A-Za-z0-9_-]*)\.outputs\.token\s*}}$/)
+			: undefined;
+	if (!tokenExpression) {
 		checks.push({
 			severity: 'error',
-			message: `${workflowFile} job '${jobName}' must create a Patchlane GitHub App token with ${permissions}.`,
+			message: `${workflowFile} job '${jobName}' must check out with a GitHub App token expression in the form \${{ steps.<id>.outputs.token }}.`,
 		});
+		return undefined;
 	}
 
-	const checkout = steps.find((step) => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'));
-	if (objectValue(checkout?.with)?.token !== expectedToken) {
+	const tokenStepId = tokenExpression[1];
+	const tokenStep = steps.find((step) => step.id === tokenStepId);
+	if (!tokenStep) {
 		checks.push({
 			severity: 'error',
-			message: `${workflowFile} job '${jobName}' must check out with the Patchlane GitHub App token.`,
+			message: `${workflowFile} job '${jobName}' checkout references missing token producer step '${tokenStepId}'.`,
+		});
+		return undefined;
+	}
+	if (typeof tokenStep.uses !== 'string') {
+		checks.push({
+			severity: 'error',
+			message: `${workflowFile} job '${jobName}' token producer step '${tokenStepId}' must use an action.`,
+		});
+		return undefined;
+	}
+
+	const directProvider = tokenStep.uses.startsWith('actions/create-github-app-token@');
+	if (directProvider) {
+		const tokenWith = objectValue(tokenStep.with);
+		const expectedClientId = `\${{ vars.${GITHUB_APP_CLIENT_ID_VARIABLE} }}`;
+		const expectedPrivateKey = `\${{ secrets.${GITHUB_APP_PRIVATE_KEY_SECRET} }}`;
+		if (
+			!tokenWith ||
+			tokenWith['client-id'] !== expectedClientId ||
+			tokenWith['private-key'] !== expectedPrivateKey ||
+			tokenWith['permission-contents'] !== requirements.contents ||
+			(requirements.workflows && tokenWith['permission-workflows'] !== 'write') ||
+			(requirements.issues && tokenWith['permission-issues'] !== 'write')
+		) {
+			const permissions = [
+				`contents: ${requirements.contents}`,
+				requirements.workflows ? 'workflows: write' : '',
+				requirements.issues ? 'issues: write' : '',
+			]
+				.filter(Boolean)
+				.join(', ');
+			checks.push({
+				severity: 'error',
+				message: `${workflowFile} job '${jobName}' must create a Patchlane GitHub App token with ${permissions}.`,
+			});
+		}
+	} else {
+		checks.push({
+			severity: 'info',
+			message: `${workflowFile} job '${jobName}' uses token wrapper '${tokenStep.uses}'; its internal GitHub App permissions cannot be verified statically. Run patchlane verify-auth to validate the token at runtime.`,
 		});
 	}
 
 	for (const step of steps.filter(
 		(step) => typeof step.run === 'string' && /\bpatchlane(?:@[^\s]+)?\s+(?:sync|promote|notify)\b/.test(step.run),
 	)) {
-		if (objectValue(step.env)?.GH_TOKEN !== expectedToken) {
+		if (objectValue(step.env)?.GH_TOKEN !== checkoutToken) {
 			checks.push({
 				severity: 'error',
 				message: `${workflowFile} job '${jobName}' must pass the Patchlane GitHub App token as GH_TOKEN.`,
@@ -311,9 +333,11 @@ export function inspectAuthenticatedJob(
 			break;
 		}
 	}
+	return directProvider ? 'direct' : 'wrapper';
 }
 
 function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
+	const authenticationProviders: AuthenticationProvider[] = [];
 	const files = workflowFiles(config, sourceSha, cwd);
 	for (const violation of validateWorkflowPolicy(config.allowedWorkflows, files)) {
 		checks.push({ severity: 'error', message: violation.message });
@@ -328,13 +352,14 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 	const promotionNotifications = config.notifications?.githubIssues.events.includes('promotion-failed') ?? false;
 	if (!sync?.workflow) checks.push({ severity: 'error', message: 'Missing .github/workflows/sync-upstream.yml.' });
 	else {
-		inspectAuthenticatedJob(
+		const provider = inspectAuthenticatedJob(
 			'.github/workflows/sync-upstream.yml',
 			'fork-sync',
 			workflowJob(sync.workflow, 'fork-sync'),
 			{ contents: 'write', workflows: true, issues: syncNotifications },
 			checks,
 		);
+		if (provider) authenticationProviders.push(provider);
 		const workflowDispatch = objectValue(eventConfig(sync.workflow, 'workflow_dispatch'));
 		if (!objectValue(workflowDispatch?.inputs)?.verification_id) {
 			checks.push({
@@ -346,7 +371,7 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 	if (!promotion?.workflow) {
 		checks.push({ severity: 'error', message: 'Missing .github/workflows/promote-tested-sync.yml.' });
 	} else {
-		inspectAuthenticatedJob(
+		const promotionProvider = inspectAuthenticatedJob(
 			'.github/workflows/promote-tested-sync.yml',
 			'promote',
 			workflowJob(promotion.workflow, 'promote'),
@@ -359,14 +384,16 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 			},
 			checks,
 		);
+		if (promotionProvider) authenticationProviders.push(promotionProvider);
 		if (ciNotifications) {
-			inspectAuthenticatedJob(
+			const notificationProvider = inspectAuthenticatedJob(
 				'.github/workflows/promote-tested-sync.yml',
 				'notify-ci-failure',
 				workflowJob(promotion.workflow, 'notify-ci-failure'),
 				{ contents: 'read', issues: true },
 				checks,
 			);
+			if (notificationProvider) authenticationProviders.push(notificationProvider);
 		}
 		const workflowRun = eventConfig(promotion.workflow, 'workflow_run');
 		const workflows =
@@ -394,6 +421,7 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 			}
 		}
 	}
+	return authenticationProviders;
 }
 
 function inspectPatchRefs(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
@@ -437,6 +465,7 @@ export function inspectGitHubAutomation(
 	cwd: string,
 	checks: DoctorCheck[],
 	runCommand: typeof run = run,
+	inspectDirectProviderCredentials = true,
 ) {
 	if (!repository) return;
 
@@ -451,6 +480,8 @@ export function inspectGitHubAutomation(
 			message: `GitHub Actions enablement could not be inspected for '${repository}'.`,
 		});
 	}
+
+	if (!inspectDirectProviderCredentials) return;
 
 	const variables = runCommand(
 		'gh',
@@ -536,9 +567,9 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 	if (resolved)
 		checks.push({ severity: 'info', message: `Resolved ${config.source} to ${resolved.label} @ ${resolved.sha}.` });
 	inspectPatchRefs(config, resolved?.sha, cwd, checks);
-	inspectWorkflows(config, resolved?.sha, cwd, checks);
+	const authenticationProviders = inspectWorkflows(config, resolved?.sha, cwd, checks);
 	const repository = githubRepository(remoteUrl(cwd, 'origin'));
-	inspectGitHubAutomation(repository, cwd, checks);
+	inspectGitHubAutomation(repository, cwd, checks, run, authenticationProviders.includes('direct'));
 	inspectNotificationAssignees(config, cwd, checks);
 	inspectBootstrap(config, cwd, checks);
 

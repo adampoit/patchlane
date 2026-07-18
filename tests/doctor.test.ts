@@ -46,30 +46,33 @@ function validTokenWith() {
 function authenticatedJob(
 	options: {
 		includeTokenStep?: boolean;
+		tokenStepId?: string;
+		tokenUses?: string;
 		tokenWith?: Record<string, unknown>;
 		checkoutToken?: string;
 		ghToken?: string;
 	} = {},
 ) {
-	const tokenWith = options.tokenWith ?? validTokenWith();
+	const tokenStepId = options.tokenStepId ?? 'patchlane-token';
+	const token = `\${{ steps.${tokenStepId}.outputs.token }}`;
 	return {
 		steps: [
 			...(options.includeTokenStep === false
 				? []
 				: [
 						{
-							id: 'patchlane-token',
-							uses: 'actions/create-github-app-token@v3',
-							with: tokenWith,
+							id: tokenStepId,
+							uses: options.tokenUses ?? 'actions/create-github-app-token@v3',
+							with: options.tokenWith ?? validTokenWith(),
 						},
 					]),
 			{
 				uses: 'actions/checkout@v4',
-				with: { token: options.checkoutToken ?? appToken },
+				with: { token: options.checkoutToken ?? token },
 			},
 			{
 				run: 'npx patchlane@1.2.3 sync',
-				env: { GH_TOKEN: options.ghToken ?? appToken },
+				env: { GH_TOKEN: options.ghToken ?? token },
 			},
 		],
 	};
@@ -115,11 +118,60 @@ describe('inspectAuthenticatedJob', () => {
 		]);
 	});
 
-	test('reports a missing App token step', () => {
+	test('reports a missing token producer step', () => {
 		expect(inspectJob(authenticatedJob({ includeTokenStep: false }))).toContainEqual(
-			expect.objectContaining({ message: expect.stringContaining('must create a Patchlane GitHub App token') }),
+			expect.objectContaining({
+				message: expect.stringContaining("missing token producer step 'patchlane-token'"),
+			}),
 		);
 	});
+
+	test('retains strict validation for a direct token provider', () => {
+		expect(inspectJob(authenticatedJob())).toEqual([]);
+	});
+
+	test('accepts a wrapper action when checkout and Patchlane use its token output', () => {
+		const checks = inspectJob(
+			authenticatedJob({ tokenStepId: 'not-adam', tokenUses: 'adampoit/not-adam@v1', tokenWith: {} }),
+		);
+		expect(checks).toEqual([
+			{
+				severity: 'info',
+				message: expect.stringContaining(
+					"uses token wrapper 'adampoit/not-adam@v1'; its internal GitHub App permissions cannot be verified statically",
+				),
+			},
+		]);
+	});
+
+	test('reports a token output expression without a producer', () => {
+		expect(
+			inspectJob(
+				authenticatedJob({
+					includeTokenStep: false,
+					checkoutToken: '${{ steps.missing.outputs.token }}',
+					ghToken: '${{ steps.missing.outputs.token }}',
+				}),
+			),
+		).toContainEqual(expect.objectContaining({ message: expect.stringContaining("producer step 'missing'") }));
+	});
+
+	test('reports a non-action token producer', () => {
+		const job = authenticatedJob() as { steps: Record<string, unknown>[] };
+		job.steps[0] = { id: 'patchlane-token', run: 'echo token' };
+		expect(inspectJob(job)).toContainEqual(
+			expect.objectContaining({ message: expect.stringContaining('must use an action') }),
+		);
+	});
+
+	test.each(['${{ github.token }}', '${{ secrets.GITHUB_TOKEN }}', '${{ steps.patchlane-token.outputs.other }}'])(
+		'reports invalid checkout token expression %s',
+		(checkoutToken) => {
+			expect(inspectJob(authenticatedJob({ checkoutToken }))).toContainEqual(
+				expect.objectContaining({ message: expect.stringContaining('steps.<id>.outputs.token') }),
+			);
+		},
+	);
 
 	test.each([
 		['client ID', { 'client-id': '${{ vars.WRONG_CLIENT_ID }}' }],
@@ -134,16 +186,33 @@ describe('inspectAuthenticatedJob', () => {
 		]);
 	});
 
-	test('reports checkout that does not use the App token', () => {
-		expect(inspectJob(authenticatedJob({ checkoutToken: '${{ github.token }}' }))).toContainEqual(
-			expect.objectContaining({
-				message: expect.stringContaining('must check out with the Patchlane GitHub App token'),
-			}),
+	test('reports a wrapper token mismatch between checkout and Patchlane', () => {
+		expect(
+			inspectJob(
+				authenticatedJob({
+					tokenStepId: 'not-adam',
+					tokenUses: 'adampoit/not-adam@v1',
+					ghToken: appToken,
+				}),
+			),
+		).toContainEqual(
+			expect.objectContaining({ message: expect.stringContaining('must pass the Patchlane GitHub App token') }),
 		);
 	});
 
 	test('reports a Patchlane command without GH_TOKEN', () => {
 		expect(inspectJob(authenticatedJob({ ghToken: '${{ github.token }}' }))).toContainEqual(
+			expect.objectContaining({ message: expect.stringContaining('must pass the Patchlane GitHub App token') }),
+		);
+	});
+
+	test('checks every Patchlane command in the job', () => {
+		const job = authenticatedJob() as { steps: Record<string, unknown>[] };
+		job.steps.push({
+			run: 'npx patchlane notify --event=sync-failed',
+			env: { GH_TOKEN: '${{ steps.other.outputs.token }}' },
+		});
+		expect(inspectJob(job)).toContainEqual(
 			expect.objectContaining({ message: expect.stringContaining('must pass the Patchlane GitHub App token') }),
 		);
 	});
@@ -193,6 +262,18 @@ describe('inspectGitHubAutomation', () => {
 				message: "Repository secrets could not be inspected for 'example/fork'.",
 			},
 		]);
+	});
+
+	test('skips standard credential metadata checks for wrapper providers', () => {
+		const checks: DoctorCheck[] = [];
+		const endpoints: string[] = [];
+		const runner = (_command: string, args: string[]) => {
+			endpoints.push(args.find((arg) => arg.startsWith('repos/')) ?? '');
+			return { status: 0, stdout: 'true', stderr: '' };
+		};
+		inspectGitHubAutomation('example/fork', '/tmp/fork', checks, runner, false);
+		expect(checks).toEqual([]);
+		expect(endpoints).toEqual(['repos/example/fork/actions/permissions']);
 	});
 });
 
