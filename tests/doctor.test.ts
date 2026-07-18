@@ -16,7 +16,7 @@ function configureUser(repo: string) {
 	git(['config', 'user.email', 'patchlane@example.test'], repo);
 }
 
-test('composes workflow changes from independent patch branches in order', () => {
+test('composes non-overlapping changes to the same workflow from independent patches', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-doctor-composed-'));
 	try {
 		const upstreamBare = path.join(tempRoot, 'upstream.git');
@@ -49,7 +49,7 @@ test('composes workflow changes from independent patch branches in order', () =>
 		writeFileSync(path.join(workflowDir, 'sync-upstream.yml'), 'name: Sync\npermissions:\n  contents: write\n');
 		writeFileSync(
 			path.join(workflowDir, 'promote-tested-sync.yml'),
-			'name: Promote\non:\n  workflow_run:\n    workflows: [Existing CI]\npermissions:\n  contents: write\n',
+			'name: Promote\non:\n  workflow_run:\n    workflows: [Product CI]\npermissions:\n  contents: write\n',
 		);
 		git(['add', '.github/workflows'], forkWork);
 		git(['commit', '-m', 'Add sync workflows'], forkWork);
@@ -70,6 +70,15 @@ test('composes workflow changes from independent patch branches in order', () =>
 		git(['commit', '-m', 'Add product patch'], forkWork);
 		git(['push', 'origin', 'patch/product'], forkWork);
 
+		git(['switch', '-c', 'patch/product-workflow', 'upstream/main'], forkWork);
+		writeFileSync(
+			path.join(workflowDir, 'ci.yml'),
+			'name: Product CI\non:\n  push:\n    branches: [feature]\nenv:\n  PRODUCT_MODE: enabled\n',
+		);
+		git(['add', '.github/workflows/ci.yml'], forkWork);
+		git(['commit', '-m', 'Configure product CI environment'], forkWork);
+		git(['push', 'origin', 'patch/product-workflow'], forkWork);
+
 		git(['switch', 'patch/sync'], forkWork);
 		writeFileSync(
 			path.join(forkWork, '.patchlane.yml'),
@@ -77,8 +86,8 @@ test('composes workflow changes from independent patch branches in order', () =>
 				'version: 1',
 				'upstream: example/upstream',
 				'source: branch:main',
-				'patchRefs: [patch/sync, patch/ci, patch/product]',
-				'ciWorkflow: Existing CI',
+				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
+				'ciWorkflow: Product CI',
 				'',
 			].join('\n'),
 		);
