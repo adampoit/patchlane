@@ -1664,6 +1664,8 @@ test('workflow policy blocks dry-run, publishing, and promotion without changing
 		configureUser(upstreamWork);
 		mkdirSync(path.join(upstreamWork, '.github', 'workflows'), { recursive: true });
 		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'ci.yml'), 'name: CI\n');
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'promote-tested-sync.yml'), 'name: Promote\n');
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'sync-upstream.yml'), 'name: Sync\n');
 		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream\n');
 		git(['add', '.'], upstreamWork);
 		git(['commit', '-m', 'Initial upstream'], upstreamWork);

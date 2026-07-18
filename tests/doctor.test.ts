@@ -88,7 +88,7 @@ test('composes non-overlapping changes to the same workflow from independent pat
 				'source: branch:main',
 				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
 				'ciWorkflow: Product CI',
-				'allowedWorkflows: [ci.yml, promote-tested-sync.yml, sync-upstream.yml]',
+				'allowedWorkflows: [ci.yml]',
 				'',
 			].join('\n'),
 		);
@@ -107,7 +107,7 @@ test('composes non-overlapping changes to the same workflow from independent pat
 				'source: branch:main',
 				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
 				'ciWorkflow: Product CI',
-				'allowedWorkflows: [missing.yml, promote-tested-sync.yml, sync-upstream.yml]',
+				'allowedWorkflows: [missing.yml]',
 				'',
 			].join('\n'),
 		);

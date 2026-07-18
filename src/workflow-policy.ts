@@ -3,6 +3,7 @@ import { parse } from 'yaml';
 
 const WORKFLOW_DIRECTORY = '.github/workflows';
 const LOCAL_WORKFLOW_PREFIX = `./${WORKFLOW_DIRECTORY}/`;
+export const PATCHLANE_GENERATED_WORKFLOWS = ['promote-tested-sync.yml', 'sync-upstream.yml'] as const;
 
 export type WorkflowFile = {
 	file: string;
@@ -52,7 +53,7 @@ export function validateWorkflowPolicy(
 ): WorkflowPolicyViolation[] {
 	if (allowedWorkflows === undefined) return [];
 
-	const allowed = new Set(allowedWorkflows);
+	const allowed = new Set([...PATCHLANE_GENERATED_WORKFLOWS, ...allowedWorkflows]);
 	const actual = new Set(workflowFiles.map(({ file }) => file));
 	const violations: WorkflowPolicyViolation[] = [];
 

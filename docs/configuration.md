@@ -17,8 +17,6 @@ patchRefs:
 ciWorkflow: CI
 allowedWorkflows:
     - ci.yml
-    - promote-tested-sync.yml
-    - sync-upstream.yml
 ```
 
 | Field              | Required    | Description                                                       |
@@ -30,9 +28,9 @@ allowedWorkflows:
 | `syncBranch`       | no          | Generated branch published for CI; defaults to `sync/integration` |
 | `patchRefs`        | yes         | Independent patch branches applied in order                       |
 | `ciWorkflow`       | recommended | Exact existing CI workflow name used by `workflow_run`            |
-| `allowedWorkflows` | no          | Exact workflow filenames permitted in the composed tree           |
+| `allowedWorkflows` | no          | Repository workflow filenames permitted alongside Patchlane's     |
 
-When `allowedWorkflows` is configured, doctor, every sync mode, and promotion reject unexpected or missing workflow files and dangling local reusable-workflow references. Sync validates after all patches are composed and before publishing `syncBranch`; promotion validates the exact `EXPECTED_SYNC_SHA`. Omitting the field preserves the existing behavior.
+When `allowedWorkflows` is configured, Patchlane implicitly adds its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows to the allowlist. Configure only repository-specific workflows such as CI. Doctor, every sync mode, and promotion then reject unexpected or missing workflow files and dangling local reusable-workflow references. Sync validates after all patches are composed and before publishing `syncBranch`; promotion validates the exact `EXPECTED_SYNC_SHA`. Omitting the field preserves the existing behavior.
 
 Supported sources:
 

@@ -3,7 +3,7 @@ import { validateWorkflowPolicy } from '../src/workflow-policy.js';
 
 test('accepts an exact composed workflow allowlist', () => {
 	const violations = validateWorkflowPolicy(
-		['ci.yml', 'promote-tested-sync.yml', 'sync-upstream.yml'],
+		['ci.yml'],
 		[
 			{ file: 'sync-upstream.yml', content: 'name: Sync\n' },
 			{ file: 'ci.yml', content: 'name: CI\n' },
@@ -14,10 +14,26 @@ test('accepts an exact composed workflow allowlist', () => {
 	expect(violations).toEqual([]);
 });
 
+test('requires implicitly allowed Patchlane workflows', () => {
+	const violations = validateWorkflowPolicy(
+		['ci.yml'],
+		[
+			{ file: 'ci.yml', content: 'name: CI\n' },
+			{ file: 'sync-upstream.yml', content: 'name: Sync\n' },
+		],
+	);
+
+	expect(violations.map(({ message }) => message)).toEqual([
+		"Allowed workflow '.github/workflows/promote-tested-sync.yml' is missing from the composed tree.",
+	]);
+});
+
 test('reports added, deleted, and dangling reusable workflows in a composed tree', () => {
 	const violations = validateWorkflowPolicy(
 		['ci.yml', 'deleted.yml', 'reusable.yml'],
 		[
+			{ file: 'promote-tested-sync.yml', content: 'name: Promote\n' },
+			{ file: 'sync-upstream.yml', content: 'name: Sync\n' },
 			{
 				file: 'ci.yml',
 				content: [
