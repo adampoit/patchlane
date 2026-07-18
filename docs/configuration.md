@@ -59,6 +59,8 @@ The generated workflows require:
 
 The App installation must grant Contents read/write and Workflows write. Enable Issues read/write when GitHub issue notifications are configured. Patchlane requests these permissions explicitly when creating each short-lived token, passes the token to checkout and `gh` as `GH_TOKEN`, and leaves the built-in `GITHUB_TOKEN` read-only.
 
+Adapted workflows may instead use a composite action that creates the App token and exposes it as `outputs.token`. Checkout and every `patchlane sync`, `promote`, or `notify` step in a job must consume the same `${{ steps.<id>.outputs.token }}` expression. No wrapper details belong in `.patchlane.yml`. Doctor validates this token flow but cannot inspect the wrapper's internal permission requests or credentials; use `verify-auth` for runtime validation. Generated workflows continue to use `actions/create-github-app-token` directly with the standard credentials and explicit least-privilege permissions.
+
 A GitHub App or user token is required for pushes that must start another workflow. GitHub deliberately suppresses most workflow events caused by the built-in `GITHUB_TOKEN`; increasing its workflow permissions does not change that behavior. See [Manual setup](manual-setup.md) for App creation and repository configuration.
 
 ## Commands
@@ -83,7 +85,7 @@ npx patchlane doctor
 npx patchlane doctor --json
 ```
 
-Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, App-token wiring, permissions, and bootstrap state without changing repository state. For GitHub origins it also attempts to inspect Actions enablement and the names—not values—of the expected repository variable and secret. Insufficient metadata access is reported as a warning.
+Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, App-token wiring, permissions, and bootstrap state without changing repository state. For GitHub origins it also attempts to inspect Actions enablement. When a job uses `actions/create-github-app-token` directly, Doctor additionally inspects the names—not values—of the expected repository variable and secret and strictly validates the action's credential and permission inputs. These direct-provider metadata checks are skipped for wrapper-only workflows. Insufficient metadata access is reported as a warning.
 
 ### Verify workflow authentication
 
