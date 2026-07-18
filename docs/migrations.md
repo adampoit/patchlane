@@ -2,9 +2,9 @@
 
 Follow the section for the version you are adopting. Migration notes are listed newest first.
 
-## vNext
+## 0.5
 
-vNext requires every version-1 `.patchlane.yml` file to define `allowedWorkflows` and updates generated workflows to authenticate with a GitHub App. Patchlane implicitly includes its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows, so list only repository-specific workflows.
+Patchlane 0.5 requires every version-1 `.patchlane.yml` file to define `allowedWorkflows` and updates generated workflows to authenticate with a GitHub App. Patchlane implicitly includes its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows, so list only repository-specific workflows.
 
 ### 1. Inventory the composed workflow tree
 
@@ -53,15 +53,15 @@ gh variable set PATCHLANE_APP_CLIENT_ID --repo "$FORK" --body "YOUR_APP_CLIENT_I
 gh secret set PATCHLANE_APP_PRIVATE_KEY --repo "$FORK" < /path/to/app-private-key.pem
 ```
 
-Replace both generated workflow files with the vNext templates. Do not merely pass `github.token` as `GH_TOKEN`: that fixes API authentication, but pushes made by the built-in `GITHUB_TOKEN` do not start the required downstream workflow runs.
+Replace both generated workflow files with the 0.5 templates. Do not merely pass `github.token` as `GH_TOKEN`: that fixes API authentication, but pushes made by the built-in `GITHUB_TOKEN` do not start the required downstream workflow runs.
 
 ### 4. Validate before rollout
 
-After pushing the updated patch refs, validate with the vNext package version selected for the migration:
+After pushing the updated patch refs, validate with Patchlane 0.5:
 
 ```bash
-npx patchlane@VERSION doctor
-npx patchlane@VERSION sync --dry-run
+npx patchlane@0.5.0 doctor
+npx patchlane@0.5.0 sync --dry-run
 ```
 
 Doctor should identify every unexpected or missing workflow by filename. The dry run validates the actual output after all configured patches are replayed without changing the local or remote sync branch.
@@ -71,13 +71,13 @@ Doctor should identify every unexpected or missing workflow by filename. The dry
 Update the pinned Patchlane version in the sync and promotion workflows as part of the same configuration patch. From that patch branch, use the new client for the first policy-enforced rebuild and promotion:
 
 ```bash
-npx patchlane@VERSION bootstrap --wait
+npx patchlane@0.5.0 bootstrap --wait
 ```
 
 This validates the allowlist before publishing `sync/integration`, waits for CI on the exact published SHA, revalidates that SHA, and then promotes it. Confirm afterward that the generated base contains the intended workflow set and that scheduled syncs use the new Patchlane version. Then validate the uploaded App credentials with a no-push workflow run:
 
 ```bash
-npx patchlane@VERSION verify-auth
+npx patchlane@0.5.0 verify-auth
 ```
 
 ### 6. Optionally enable maintainer notifications
@@ -101,7 +101,7 @@ notifications:
         closeOnRecovery: true
 ```
 
-Update both generated workflow files from the vNext templates in the same patch:
+Update both generated workflow files from the 0.5 templates in the same patch:
 
 - `sync-upstream.yml` must request `permission-issues: write` for its App token, report `sync-failed` after a failed sync, and optionally report recovery after success.
 - `promote-tested-sync.yml` must request `permission-issues: write` in jobs that report issues, report unsuccessful CI workflow runs, report failed promotions, and optionally report each recovery.
