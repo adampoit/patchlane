@@ -128,6 +128,7 @@ function runSync(
 	allowDependentPatches = false,
 	dryRun = false,
 	forcePush = false,
+	allowedWorkflows?: string,
 ) {
 	const launcherDir = mkdtempSync(path.join(tmpdir(), 'patchlane-gh-'));
 	createLauncher(launcherDir);
@@ -150,6 +151,7 @@ function runSync(
 		FORCE_PUSH: forcePush ? 'true' : 'false',
 		UPSTREAM_REMOTE_URL: upstreamRemoteUrl,
 		ALLOW_DEPENDENT_PATCHES: allowDependentPatches ? 'true' : 'false',
+		...(allowedWorkflows === undefined ? {} : { ALLOWED_WORKFLOWS: allowedWorkflows }),
 	};
 
 	const result = run('node', [cliPath], worktree, env);
@@ -157,7 +159,13 @@ function runSync(
 	return result;
 }
 
-function runPromote(worktree: string, outputFile: string, summaryFile: string, expectedSha: string) {
+function runPromote(
+	worktree: string,
+	outputFile: string,
+	summaryFile: string,
+	expectedSha: string,
+	allowedWorkflows?: string,
+) {
 	const env = {
 		...process.env,
 		GITHUB_OUTPUT: outputFile,
@@ -165,6 +173,7 @@ function runPromote(worktree: string, outputFile: string, summaryFile: string, e
 		BASE_BRANCH: 'main',
 		SYNC_BRANCH: 'sync/integration',
 		EXPECTED_SYNC_SHA: expectedSha,
+		...(allowedWorkflows === undefined ? {} : { ALLOWED_WORKFLOWS: allowedWorkflows }),
 	};
 
 	return run('node', [promoteCliPath], worktree, env);
@@ -1630,6 +1639,132 @@ test('integration sync CLI handles workflow file deletions and additions cleanly
 		expect(readOutput(syncOut, 'applied_refs')).toBe('patch/workflows');
 		expect(existsSync(path.join(syncWork, '.github', 'workflows', 'new-ci.yml'))).toBe(true);
 		expect(existsSync(path.join(syncWork, '.github', 'workflows', 'ci.yml'))).toBe(false);
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('workflow policy blocks dry-run, publishing, and promotion without changing generated refs', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-workflow-policy-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const firstWork = path.join(tempRoot, 'first-work');
+		const blockedWork = path.join(tempRoot, 'blocked-work');
+		const promoteWork = path.join(tempRoot, 'promote-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		mkdirSync(path.join(upstreamWork, '.github', 'workflows'), { recursive: true });
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'ci.yml'), 'name: CI\n');
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'promote-tested-sync.yml'), 'name: Promote\n');
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'sync-upstream.yml'), 'name: Sync\n');
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream\n');
+		git(['add', '.'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+		createPatchBranch(forkSeed, 'patch/product', 'upstream/main', 'PRODUCT.txt', 'product patch');
+
+		git(['clone', forkBare, firstWork], tempRoot);
+		configureUser(firstWork);
+		const firstOut = path.join(tempRoot, 'first.out');
+		const firstRun = runSync(
+			firstWork,
+			stateDir,
+			firstOut,
+			path.join(tempRoot, 'first.summary'),
+			'patch/product',
+			'main',
+			'',
+			false,
+			upstreamBare,
+			false,
+			false,
+			false,
+			'ci.yml',
+		);
+		expectSuccess(firstRun);
+		const publishedSha = readOutput(firstOut, 'sync_sha');
+
+		writeFileSync(path.join(upstreamWork, '.github', 'workflows', 'release.yml'), 'name: Release\n');
+		git(['add', '.github/workflows/release.yml'], upstreamWork);
+		git(['commit', '-m', 'Add upstream release workflow'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+
+		git(['clone', forkBare, blockedWork], tempRoot);
+		configureUser(blockedWork);
+		const dryRunOut = path.join(tempRoot, 'dry-run.out');
+		const dryRun = runSync(
+			blockedWork,
+			stateDir,
+			dryRunOut,
+			path.join(tempRoot, 'dry-run.summary'),
+			'patch/product',
+			'main',
+			'',
+			false,
+			upstreamBare,
+			false,
+			true,
+			false,
+			'ci.yml',
+		);
+		expect(dryRun.status).not.toBe(0);
+		expect(readOutput(dryRunOut, 'status')).toBe('workflow_policy');
+		expect(dryRun.stderr).toContain('release.yml');
+
+		const blockedOut = path.join(tempRoot, 'blocked.out');
+		const blocked = runSync(
+			blockedWork,
+			stateDir,
+			blockedOut,
+			path.join(tempRoot, 'blocked.summary'),
+			'patch/product',
+			'main',
+			'',
+			false,
+			upstreamBare,
+			false,
+			false,
+			false,
+			'ci.yml',
+		);
+		expect(blocked.status).not.toBe(0);
+		expect(readOutput(blockedOut, 'status')).toBe('workflow_policy');
+		git(['fetch', 'origin', 'sync/integration'], forkSeed);
+		expect(git(['rev-parse', 'refs/remotes/origin/sync/integration'], forkSeed)).toBe(publishedSha);
+
+		git(['fetch', 'upstream', 'main'], forkSeed);
+		git(['push', '--force', 'origin', 'upstream/main:refs/heads/sync/integration'], forkSeed);
+		const unvalidatedSha = git(['rev-parse', 'upstream/main'], forkSeed);
+		git(['clone', forkBare, promoteWork], tempRoot);
+		configureUser(promoteWork);
+		const promoteOut = path.join(tempRoot, 'promote.out');
+		const promote = runPromote(
+			promoteWork,
+			promoteOut,
+			path.join(tempRoot, 'promote.summary'),
+			unvalidatedSha,
+			'ci.yml',
+		);
+		expect(promote.status).not.toBe(0);
+		expect(readOutput(promoteOut, 'status')).toBe('workflow_policy');
+		git(['fetch', 'origin', 'main'], forkSeed);
+		expect(remoteHasPath(forkSeed, 'refs/remotes/origin/main', '.github/workflows/release.yml')).toBe(false);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}

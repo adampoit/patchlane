@@ -1,9 +1,10 @@
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveUpstreamSource } from './upstream-source.js';
+import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
 type RunOptions = {
 	cwd?: string;
@@ -206,6 +207,7 @@ export type IntegrationSyncOptions = {
 	upstreamOwner: string;
 	upstreamRepo: string;
 	patchRefs: string;
+	allowedWorkflows?: string[];
 	baseBranch?: string;
 	source?: string;
 	upstreamRef?: string;
@@ -261,6 +263,27 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	const upstreamRemoteName = options.upstreamRemoteName ?? 'upstream';
 	const upstreamRemoteUrl = options.upstreamRemoteUrl ?? `https://github.com/${upstreamOwner}/${upstreamRepo}.git`;
 	const remoteSyncRef = `refs/remotes/${originRemoteName}/${syncBranch}`;
+
+	function enforceWorkflowPolicy(targetCwd: string, rebuiltSyncSha: string) {
+		if (options.allowedWorkflows === undefined) return;
+		const violations = validateWorkflowPolicy(
+			options.allowedWorkflows,
+			workflowFilesAtRef(targetCwd, rebuiltSyncSha),
+		);
+		if (!violations.length) return;
+
+		writeOutput('sync_sha', '');
+		writeOutput('status', 'workflow_policy');
+		writeSummary(
+			'## Integration rebuild blocked',
+			[
+				`- Composed SHA: \`${rebuiltSyncSha}\``,
+				'- Reason: the composed workflow tree violates allowedWorkflows.',
+			].join('\n'),
+			`### Workflow policy violations\n\n${violations.map(({ message }) => `- ${message}`).join('\n')}`,
+		);
+		fail(`Workflow policy violation: ${violations[0]!.message}`);
+	}
 
 	const existingUpstream = git(['remote', 'get-url', upstreamRemoteName], {
 		allowFailure: true,
@@ -609,7 +632,8 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		const worktreeDir = mkdtempSync(path.join(tmpdir(), 'patchlane-dry-run-'));
 		try {
 			git(['worktree', 'add', '--detach', worktreeDir, upstreamBase]);
-			const { appliedRefs, patchDiagnostics } = applyAllPatches(worktreeDir, true);
+			const { appliedRefs, patchDiagnostics, rebuiltSyncSha } = applyAllPatches(worktreeDir, true);
+			enforceWorkflowPolicy(worktreeDir, rebuiltSyncSha);
 
 			writeOutput('failed_bookmark', '');
 			writeOutput('failed_commit', '');
@@ -640,6 +664,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 	log(`Building ${syncBranch} from ${sourceLabel}`);
 	git(['checkout', '-B', syncBranch, upstreamBase]);
 	const { appliedRefs, patchDiagnostics, rebuiltSyncSha } = applyAllPatches(process.cwd(), false);
+	enforceWorkflowPolicy(process.cwd(), rebuiltSyncSha);
 
 	writeOutput('failed_bookmark', '');
 	writeOutput('failed_commit', '');
@@ -727,6 +752,8 @@ function main() {
 		upstreamOwner: requireEnv('UPSTREAM_OWNER'),
 		upstreamRepo: requireEnv('UPSTREAM_REPO'),
 		patchRefs: requireEnv('PATCH_REFS'),
+		allowedWorkflows:
+			process.env.ALLOWED_WORKFLOWS === undefined ? undefined : parsePatchRefs(process.env.ALLOWED_WORKFLOWS),
 		baseBranch: getEnv('BASE_BRANCH', 'main'),
 		upstreamRef: getEnv('UPSTREAM_REF'),
 		source: getEnv('UPSTREAM_SOURCE'),

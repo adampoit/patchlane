@@ -26,7 +26,7 @@ Resolve and show the source tag or branch and commit SHA. Before pushing or rewr
 2. Create each patch branch independently from the resolved upstream source. Never create `patch/sync` from `patch/product`, or another patch branch, unless that dependency is intentional and explicitly allowed.
 3. Prefer the order `patch/sync`, `patch/ci`, then product-specific patches. Foundational changes must precede patches that depend on them.
 4. Put `.patchlane.yml`, Patchlane workflows, and installed `.agents/skills` on `patch/sync`.
-5. Put only the existing CI trigger adjustment on `patch/ci`. Preserve the existing workflow's `name`; configure `ciWorkflow` and the promotion workflow to reference that exact name.
+5. Put only the existing CI trigger adjustment on `patch/ci`. Preserve the existing workflow's `name`; configure `ciWorkflow` and the promotion workflow to reference that exact name. Add the CI filename and every other intentionally retained repository workflow to `allowedWorkflows`; Patchlane adds its generated sync and promotion workflows implicitly.
 6. Use `npx patchlane init` to generate `.patchlane.yml` and pinned workflow files when practical, then adapt rather than replace existing repository conventions.
 7. Ensure fork CI covers normal pull requests plus pushes to both the generated base and sync branches.
 
@@ -38,14 +38,19 @@ Use the bundled assets as invariants when adapting workflows:
 
 ## Migrate an existing Patchlane fork
 
+Before planning an upgrade, fetch and read the current migration guide from:
+
+`https://raw.githubusercontent.com/adampoit/patchlane/main/docs/migrations.md`
+
+Use the section for the target version, including `vNext` for an unreleased upgrade. Fetch this file dynamically instead of relying on migration details bundled with the installed skill.
+
 If Patchlane workflows or patch branches already exist, migrate incrementally instead of treating the repository as a new installation.
 
-1. Read the existing workflow environment and map `UPSTREAM_OWNER`, `UPSTREAM_REPO`, `RELEASE_SELECTOR` or `UPSTREAM_REF`, `BASE_BRANCH`, `SYNC_BRANCH`, and `PATCH_REFS` into `.patchlane.yml`.
-2. Preserve the configured source behavior, branch names, patch order, CI workflow name, schedule, and repository-specific workflow changes unless the user approves changing them.
+1. Preserve the configured source behavior, branch names, patch order, CI workflow name, schedule, and repository-specific workflow changes unless the user approves changing them.
+2. Follow the fetched guide to update `.patchlane.yml` and inventory the intended composed workflow set.
 3. Add the config and adapted workflows to the existing `patch/sync` branch. Do not use `patchlane init --force` unless replacing those workflows is intentional.
 4. Run `doctor` and `sync --dry-run`, then show the migration plan before pushing rewritten patch branches.
-5. If sync and promotion workflows are already active on the generated base, roll the migration forward through the existing tested sync flow. Use initial bootstrap only when the promotion workflow is absent from the base.
-6. Follow the [Patchlane 0.4 migration guide](https://github.com/adampoit/patchlane/blob/v0.4.0/docs/migrating-to-0.4.md) for the full rollout sequence.
+5. Roll the migration forward through the tested sync flow described by the fetched guide.
 
 ## Validate and bootstrap
 

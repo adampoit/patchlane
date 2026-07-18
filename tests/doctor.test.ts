@@ -88,6 +88,7 @@ test('composes non-overlapping changes to the same workflow from independent pat
 				'source: branch:main',
 				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
 				'ciWorkflow: Product CI',
+				'allowedWorkflows: [ci.yml]',
 				'',
 			].join('\n'),
 		);
@@ -96,6 +97,27 @@ test('composes non-overlapping changes to the same workflow from independent pat
 		expect(report.ok).toBe(true);
 		expect(report.checks).not.toContainEqual(
 			expect.objectContaining({ message: expect.stringContaining('must run on pushes') }),
+		);
+
+		writeFileSync(
+			path.join(forkWork, '.patchlane.yml'),
+			[
+				'version: 1',
+				'upstream: example/upstream',
+				'source: branch:main',
+				'patchRefs: [patch/sync, patch/ci, patch/product, patch/product-workflow]',
+				'ciWorkflow: Product CI',
+				'allowedWorkflows: [missing.yml]',
+				'',
+			].join('\n'),
+		);
+		const deniedReport = runDoctor({ cwd: forkWork, json: true });
+		expect(deniedReport.ok).toBe(false);
+		expect(deniedReport.checks).toContainEqual(
+			expect.objectContaining({ severity: 'error', message: expect.stringContaining('ci.yml') }),
+		);
+		expect(deniedReport.checks).toContainEqual(
+			expect.objectContaining({ severity: 'error', message: expect.stringContaining('missing.yml') }),
 		);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
@@ -132,7 +154,7 @@ test('reports a ready configuration and required bootstrap', () => {
 
 		writeFileSync(
 			path.join(forkWork, '.patchlane.yml'),
-			'version: 1\nupstream: example/upstream\nsource: branch:main\npatchRefs: [patch/sync]\nciWorkflow: Existing CI\n',
+			'version: 1\nupstream: example/upstream\nsource: branch:main\npatchRefs: [patch/sync]\nciWorkflow: Existing CI\nallowedWorkflows: [ci.yml]\n',
 		);
 		const workflowDir = path.join(forkWork, '.github', 'workflows');
 		mkdirSync(workflowDir, { recursive: true });

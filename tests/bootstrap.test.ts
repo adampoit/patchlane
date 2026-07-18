@@ -24,6 +24,7 @@ const config: PatchlaneConfig = {
 	syncBranch: 'sync/integration',
 	patchRefs: ['patch/sync', 'patch/product'],
 	ciWorkflow: 'Fork CI',
+	allowedWorkflows: ['fork-ci.yml'],
 };
 
 function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
@@ -133,6 +134,7 @@ describe('bootstrapPatchlane', () => {
 		expect(run).toHaveBeenNthCalledWith(4, 'gh', ['run', 'watch', '42', '--exit-status'], cwd);
 		expect(runPromoteSync).toHaveBeenCalledWith({
 			expectedSyncSha: syncSha,
+			allowedWorkflows: config.allowedWorkflows,
 			baseBranch: config.baseBranch,
 			syncBranch: config.syncBranch,
 			originRemoteName: 'origin',

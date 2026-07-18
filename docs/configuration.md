@@ -15,17 +15,22 @@ patchRefs:
     - patch/ci
     - patch/product
 ciWorkflow: CI
+allowedWorkflows:
+    - ci.yml
 ```
 
-| Field        | Required    | Description                                                       |
-| ------------ | ----------- | ----------------------------------------------------------------- |
-| `version`    | yes         | Configuration schema version; currently `1`                       |
-| `upstream`   | yes         | GitHub repository in `owner/repo` form                            |
-| `source`     | yes         | Explicit release or branch source                                 |
-| `baseBranch` | no          | Generated branch promoted after successful CI; defaults to `main` |
-| `syncBranch` | no          | Generated branch published for CI; defaults to `sync/integration` |
-| `patchRefs`  | yes         | Independent patch branches applied in order                       |
-| `ciWorkflow` | recommended | Exact existing CI workflow name used by `workflow_run`            |
+| Field              | Required    | Description                                                       |
+| ------------------ | ----------- | ----------------------------------------------------------------- |
+| `version`          | yes         | Configuration schema version; currently `1`                       |
+| `upstream`         | yes         | GitHub repository in `owner/repo` form                            |
+| `source`           | yes         | Explicit release or branch source                                 |
+| `baseBranch`       | no          | Generated branch promoted after successful CI; defaults to `main` |
+| `syncBranch`       | no          | Generated branch published for CI; defaults to `sync/integration` |
+| `patchRefs`        | yes         | Independent patch branches applied in order                       |
+| `ciWorkflow`       | recommended | Exact existing CI workflow name used by `workflow_run`            |
+| `allowedWorkflows` | yes         | Repository workflow filenames permitted alongside generated ones  |
+
+Patchlane implicitly adds its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows to the allowlist. Configure only repository-specific workflows such as CI; use an empty list when no additional workflows are expected. Doctor, every sync mode, and promotion reject unexpected or missing workflow files and dangling local reusable-workflow references. Sync validates after all patches are composed and before publishing `syncBranch`; promotion validates the exact `EXPECTED_SYNC_SHA`.
 
 Supported sources:
 
@@ -45,10 +50,11 @@ npx patchlane init \
   --upstream=upstream-org/upstream-repo \
   --source=release:latest \
   --patch-refs=patch/sync,patch/ci \
-  --ci-workflow="CI"
+  --ci-workflow="CI" \
+  --allowed-workflows=ci.yml
 ```
 
-This writes `.patchlane.yml`, `.github/workflows/sync-upstream.yml`, and `.github/workflows/promote-tested-sync.yml`. It does not create patch branches or modify existing CI triggers.
+This writes `.patchlane.yml`, `.github/workflows/sync-upstream.yml`, and `.github/workflows/promote-tested-sync.yml`. When `--allowed-workflows` is omitted, init adds the detected CI filename (or `fork-ci.yml`) to the configuration. It does not create patch branches or modify existing CI triggers.
 
 ### Inspect setup
 
@@ -57,7 +63,7 @@ npx patchlane doctor
 npx patchlane doctor --json
 ```
 
-Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration, CI triggers, permissions, and bootstrap state without changing repository state.
+Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, permissions, and bootstrap state without changing repository state.
 
 ### Validate or publish a sync
 
@@ -134,4 +140,4 @@ Patchlane writes these outputs when `GITHUB_OUTPUT` is available:
 - `failed_commit`
 - `conflicted_paths`
 
-Sync status can be `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, `invalid_patch`, or `invalid_patch_base`.
+Sync status can be `dry_run`, `no_push`, `published`, `unchanged`, `missing_patch`, `conflicted`, `invalid_patch`, `invalid_patch_base`, or `workflow_policy`.

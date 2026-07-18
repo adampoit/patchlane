@@ -2,7 +2,12 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
-import { PATCHLANE_CONFIG_FILE, serializePatchlaneConfig, type PatchlaneConfig } from './config.js';
+import {
+	parseAllowedWorkflows,
+	PATCHLANE_CONFIG_FILE,
+	serializePatchlaneConfig,
+	type PatchlaneConfig,
+} from './config.js';
 import { getPackageVersion } from './package-version.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { renderPromotionWorkflow, renderSyncWorkflow } from './workflow-templates.js';
@@ -14,6 +19,7 @@ export type InitOptions = {
 	syncBranch?: string;
 	patchRefs?: string;
 	ciWorkflow?: string;
+	allowedWorkflows?: string;
 	force?: boolean;
 	cwd?: string;
 };
@@ -59,8 +65,8 @@ function detectCiWorkflow(cwd: string) {
 		.filter((candidate): candidate is { file: string; name: string } => Boolean(candidate.name));
 
 	return (
-		candidates.find((candidate) => /^ci\.ya?ml$/i.test(candidate.file))?.name ??
-		candidates.find((candidate) => /\bci\b/i.test(candidate.name))?.name
+		candidates.find((candidate) => /^ci\.ya?ml$/i.test(candidate.file)) ??
+		candidates.find((candidate) => /\bci\b/i.test(candidate.name))
 	);
 }
 
@@ -93,6 +99,14 @@ export function initializePatchlane(options: InitOptions = {}) {
 
 	const source = options.source ?? 'release:latest';
 	parseUpstreamSource(source);
+	const detectedCiWorkflow = detectCiWorkflow(cwd);
+	const configuredAllowedWorkflows =
+		options.allowedWorkflows === undefined
+			? [detectedCiWorkflow?.file ?? 'fork-ci.yml']
+			: options.allowedWorkflows
+					.split(/\r?\n|,/)
+					.map((workflow) => workflow.trim())
+					.filter(Boolean);
 	const config: PatchlaneConfig = {
 		upstreamOwner: upstream.slice(0, separator),
 		upstreamRepo: upstream.slice(separator + 1),
@@ -100,7 +114,8 @@ export function initializePatchlane(options: InitOptions = {}) {
 		baseBranch: options.baseBranch ?? 'main',
 		syncBranch: options.syncBranch ?? 'sync/integration',
 		patchRefs: parsePatchRefs(options.patchRefs ?? 'patch/sync,patch/ci'),
-		ciWorkflow: options.ciWorkflow ?? detectCiWorkflow(cwd) ?? 'Fork CI',
+		ciWorkflow: options.ciWorkflow ?? detectedCiWorkflow?.name ?? 'Fork CI',
+		allowedWorkflows: parseAllowedWorkflows(configuredAllowedWorkflows),
 	};
 
 	const force = options.force ?? false;
@@ -124,6 +139,7 @@ export function initializePatchlane(options: InitOptions = {}) {
 			`Upstream source: ${config.source}`,
 			`Patch order: ${config.patchRefs.join(', ')}`,
 			`CI workflow: ${config.ciWorkflow}`,
+			`Allowed repository workflows: ${config.allowedWorkflows.join(', ') || '(none)'}`,
 			'Run `npx patchlane doctor` before publishing any branches.',
 		].join('\n') + '\n',
 	);

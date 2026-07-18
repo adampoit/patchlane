@@ -141,6 +141,7 @@ export async function bootstrapPatchlane(options: BootstrapOptions = {}) {
 		upstreamOwner: config.upstreamOwner,
 		upstreamRepo: config.upstreamRepo,
 		patchRefs: config.patchRefs.join(','),
+		allowedWorkflows: config.allowedWorkflows,
 		baseBranch: config.baseBranch,
 		source: config.source,
 		syncBranch: config.syncBranch,
@@ -203,6 +204,7 @@ export async function bootstrapPatchlane(options: BootstrapOptions = {}) {
 
 	runPromoteSync({
 		expectedSyncSha: syncSha,
+		allowedWorkflows: config.allowedWorkflows,
 		baseBranch: config.baseBranch,
 		syncBranch: config.syncBranch,
 		originRemoteName,
