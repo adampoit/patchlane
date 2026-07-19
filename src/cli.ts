@@ -76,6 +76,10 @@ cli.command('init', 'Create Patchlane config and workflow files')
 cli.command('bootstrap', 'Validate and publish the first generated sync branch')
 	.option('--publish', 'Publish the generated sync branch after validation')
 	.option('--wait', 'Publish, wait for CI, and perform the initial promotion')
+	.option('--repository <owner/repo>', 'Fork GitHub repository; inferred from the origin push target')
+	.option('--origin-remote-name <name>', 'Name of the origin remote', {
+		default: env('ORIGIN_REMOTE_NAME', 'origin'),
+	})
 	.option('--ci-timeout <seconds>', 'Maximum time to wait for the CI run to appear', {
 		default: env('PATCHLANE_CI_TIMEOUT_SECONDS'),
 	})
@@ -86,6 +90,8 @@ cli.command('bootstrap', 'Validate and publish the first generated sync branch')
 		void bootstrapPatchlane({
 			publish: args.publish === true,
 			wait: args.wait === true,
+			repository: args.repository,
+			originRemoteName: args.originRemoteName,
 			ciTimeoutSeconds: args.ciTimeout === undefined ? undefined : Number(args.ciTimeout),
 			ciPollIntervalSeconds: args.ciPollInterval === undefined ? undefined : Number(args.ciPollInterval),
 		}).catch((error: unknown) => {
@@ -102,6 +108,10 @@ cli.command('doctor', 'Check Patchlane configuration without changing repository
 	});
 
 cli.command('verify-auth', 'Dispatch a no-push sync to verify GitHub App authentication')
+	.option('--repository <owner/repo>', 'Fork GitHub repository; inferred from the origin push target')
+	.option('--origin-remote-name <name>', 'Name of the origin remote', {
+		default: env('ORIGIN_REMOTE_NAME', 'origin'),
+	})
 	.option('--timeout <seconds>', 'Maximum time to wait for the workflow run to appear', {
 		default: env('PATCHLANE_AUTH_TIMEOUT_SECONDS'),
 	})
@@ -110,6 +120,8 @@ cli.command('verify-auth', 'Dispatch a no-push sync to verify GitHub App authent
 	})
 	.action((args) => {
 		void verifyGitHubAuth({
+			repository: args.repository,
+			originRemoteName: args.originRemoteName,
 			timeoutSeconds: args.timeout === undefined ? undefined : Number(args.timeout),
 			pollIntervalSeconds: args.pollInterval === undefined ? undefined : Number(args.pollInterval),
 		}).catch((error: unknown) => {
@@ -212,8 +224,9 @@ cli.command('sync', 'Rebuild integration branch from upstream and patches')
 cli.command('notify', 'Create, update, or close an automation failure issue')
 	.option('--event <event>', 'Notification event: sync-failed, ci-failed, or promotion-failed')
 	.option('--recovered', 'Close the open notification after recovery')
-	.option('--repository <owner/repo>', 'GitHub repository; defaults to the current fork', {
-		default: env('GITHUB_REPOSITORY'),
+	.option('--repository <owner/repo>', 'Fork GitHub repository; inferred from the origin push target')
+	.option('--origin-remote-name <name>', 'Name of the origin remote', {
+		default: env('ORIGIN_REMOTE_NAME', 'origin'),
 	})
 	.option('--status <status>', 'Failure status', { default: env('PATCHLANE_STATUS') })
 	.option('--run-url <url>', 'Workflow run URL', {
@@ -259,6 +272,7 @@ cli.command('notify', 'Create, update, or close an automation failure issue')
 			event: args.event as NotificationEvent,
 			recovered: args.recovered === true,
 			repository: args.repository,
+			originRemoteName: args.originRemoteName,
 			status: args.status,
 			runUrl: args.runUrl,
 			upstreamSource: args.upstreamSource,

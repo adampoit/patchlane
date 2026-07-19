@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { loadPatchlaneConfig } from './config.js';
+import { resolveForkRepository } from './github-repository.js';
 import { run } from './subprocess.js';
 
 const DEFAULT_TIMEOUT_SECONDS = 60;
@@ -7,6 +8,8 @@ const DEFAULT_POLL_INTERVAL_SECONDS = 2;
 
 type VerifyAuthOptions = {
 	cwd?: string;
+	repository?: string;
+	originRemoteName?: string;
 	timeoutSeconds?: number;
 	pollIntervalSeconds?: number;
 	verificationId?: string;
@@ -83,13 +86,11 @@ export async function verifyGitHubAuth(options: VerifyAuthOptions = {}) {
 	const config = loadPatchlaneConfig(cwd);
 	if (!config) throw new Error('Missing .patchlane.yml. Run `npx patchlane init` first.');
 
-	const repositoryResult = run('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], cwd);
-	if (repositoryResult.status !== 0 || !repositoryResult.stdout) {
-		throw new Error(
-			`Could not determine the GitHub repository: ${repositoryResult.stderr || repositoryResult.stdout || 'unknown error'}`,
-		);
-	}
-	const repository = repositoryResult.stdout;
+	const repository = resolveForkRepository({
+		cwd,
+		repository: options.repository,
+		originRemoteName: options.originRemoteName ?? process.env.ORIGIN_REMOTE_NAME,
+	});
 	const timeoutSeconds = positiveSeconds(options.timeoutSeconds, DEFAULT_TIMEOUT_SECONDS, 'Auth timeout');
 	const pollIntervalSeconds = positiveSeconds(
 		options.pollIntervalSeconds,
@@ -98,6 +99,7 @@ export async function verifyGitHubAuth(options: VerifyAuthOptions = {}) {
 	);
 	const verificationId = options.verificationId ?? randomUUID();
 	const expectedTitle = `Verify Patchlane authentication (${verificationId})`;
+	process.stdout.write(`Dispatching the Patchlane authentication check in ${repository}.\n`);
 	const dispatch = run(
 		'gh',
 		[

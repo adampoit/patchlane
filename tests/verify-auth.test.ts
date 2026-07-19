@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { loadPatchlaneConfig, type PatchlaneConfig } from '../src/config.js';
+import { resolveForkRepository } from '../src/github-repository.js';
 import { run, type CommandResult } from '../src/subprocess.js';
 import { verifyGitHubAuth } from '../src/verify-auth.js';
 
 vi.mock('../src/config.js', () => ({ loadPatchlaneConfig: vi.fn() }));
+vi.mock('../src/github-repository.js', () => ({ resolveForkRepository: vi.fn() }));
 vi.mock('../src/subprocess.js', () => ({ run: vi.fn() }));
 
 const cwd = '/tmp/patchlane-auth';
@@ -34,6 +36,7 @@ function verificationRun(databaseId = 11) {
 beforeEach(() => {
 	vi.resetAllMocks();
 	vi.mocked(loadPatchlaneConfig).mockReturnValue(config);
+	vi.mocked(resolveForkRepository).mockReturnValue(repository);
 });
 
 afterEach(() => {
@@ -43,7 +46,6 @@ afterEach(() => {
 describe('verifyGitHubAuth', () => {
 	test('dispatches and watches a correlated no-push workflow run', async () => {
 		vi.mocked(run)
-			.mockReturnValueOnce(result({ stdout: repository }))
 			.mockReturnValueOnce(result())
 			.mockReturnValueOnce(runs(verificationRun(), { databaseId: 10, displayTitle: 'Sync Upstream Integration' }))
 			.mockReturnValueOnce(result({ stdout: 'Authentication passed' }));
@@ -53,8 +55,13 @@ describe('verifyGitHubAuth', () => {
 			repository,
 			runId: '11',
 		});
+		expect(resolveForkRepository).toHaveBeenCalledWith({
+			cwd,
+			repository: undefined,
+			originRemoteName: undefined,
+		});
 		expect(run).toHaveBeenNthCalledWith(
-			2,
+			1,
 			'gh',
 			[
 				'workflow',
@@ -77,7 +84,6 @@ describe('verifyGitHubAuth', () => {
 	test('waits for GitHub to expose the correlated run', async () => {
 		vi.useFakeTimers();
 		vi.mocked(run)
-			.mockReturnValueOnce(result({ stdout: repository }))
 			.mockReturnValueOnce(result())
 			.mockReturnValueOnce(runs({ databaseId: 10, displayTitle: 'Sync Upstream Integration' }))
 			.mockReturnValueOnce(runs(verificationRun()))
@@ -94,7 +100,6 @@ describe('verifyGitHubAuth', () => {
 
 	test('reports a failed authentication workflow', async () => {
 		vi.mocked(run)
-			.mockReturnValueOnce(result({ stdout: repository }))
 			.mockReturnValueOnce(result())
 			.mockReturnValueOnce(runs(verificationRun()))
 			.mockReturnValueOnce(result({ status: 1, stderr: 'token creation failed' }));
