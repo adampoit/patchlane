@@ -47,7 +47,7 @@ Use `allowedWorkflows: []` when the composed tree should contain only Patchlane'
 
 Inspect the existing workflows and choose how the fork should authenticate before replacing or adapting them. The token must be able to push repository contents, update workflow files, and start downstream workflows. Enable issue access when GitHub issue notifications are configured. Do not use `github.token` or `secrets.GITHUB_TOKEN`: pushes made by the built-in `GITHUB_TOKEN` do not start the required downstream workflow runs.
 
-The generated 0.5.1 workflows use `actions/create-github-app-token`. For this default, create or reuse a GitHub App installed on the fork with Contents read/write and Workflows write, plus Issues read/write when notifications are enabled. Configure its credentials using the standard names:
+The latest 0.5 workflows use `actions/create-github-app-token`. For this default, create or reuse a GitHub App installed on the fork with Contents read/write and Workflows write, plus Issues read/write when notifications are enabled. Configure its credentials using the standard names:
 
 ```bash
 FORK=OWNER/REPOSITORY
@@ -57,25 +57,25 @@ gh secret set PATCHLANE_APP_PRIVATE_KEY --repo "$FORK" < /path/to/app-private-ke
 
 Alternatively, preserve an established authentication source or use another source selected by the maintainer. Patchlane accepts a token exposed by an action or `run` step as `${{ steps.<id>.outputs.<name> }}`, or a suitable App or user token stored as `${{ secrets.<name> }}`. Checkout and every Patchlane command in the job must use the exact same expression. Keep the selected source's existing inputs and secret names; do not request a client ID or duplicate private-key secret unless that source requires them.
 
-Update both workflow files to the 0.5.1 structure without overwriting the selected authentication implementation. Doctor validates custom token wiring but cannot inspect how the token is created or which capabilities it has. Confirm the selected authentication with the first workflow-driven published sync, including the downstream CI run and promotion.
+Update both workflow files to the latest 0.5 structure without overwriting the selected authentication implementation. Doctor validates custom token wiring but cannot inspect how the token is created or which capabilities it has. Confirm the selected authentication with the first workflow-driven published sync, including the downstream CI run and promotion.
 
 ### 4. Validate before rollout
 
 After pushing the updated patch refs, validate with Patchlane 0.5:
 
 ```bash
-npx patchlane@0.5.1 doctor
-npx patchlane@0.5.1 sync --dry-run
+npx patchlane@0.5 doctor
+npx patchlane@0.5 sync --dry-run
 ```
 
 Doctor should identify every unexpected or missing workflow by filename. The dry run validates the actual output after all configured patches are replayed without changing the local or remote sync branch.
 
 ### 5. Roll out through a tested promotion
 
-Update the pinned Patchlane version in the sync and promotion workflows as part of the same configuration patch. From that patch branch, use the new client for the first policy-enforced rebuild and promotion:
+Update the Patchlane version selector in the sync and promotion workflows as part of the same configuration patch. From that patch branch, use the latest 0.5 client for the first policy-enforced rebuild and promotion:
 
 ```bash
-npx patchlane@0.5.1 bootstrap --wait
+npx patchlane@0.5 bootstrap --wait
 ```
 
 This validates the allowlist before publishing `sync/integration`, waits for CI on the exact published SHA, revalidates that SHA, and then promotes it. Confirm afterward that the generated base contains the intended workflow set and that scheduled syncs use the new Patchlane version. On the first workflow-driven sync that publishes a new integration SHA, confirm that authentication succeeds, CI runs as a `push` for that SHA, and promotion updates the base branch.
@@ -163,8 +163,8 @@ Commit and push the updated `patch/sync` branch.
 From `patch/sync`, run:
 
 ```bash
-npx patchlane@0.4.0 doctor
-npx patchlane@0.4.0 sync --dry-run
+npx patchlane@0.4 doctor
+npx patchlane@0.4 sync --dry-run
 ```
 
 `doctor` should resolve the same upstream source and patch order as the legacy workflow. Review every warning before publishing.
@@ -176,8 +176,8 @@ If the existing sync and promotion workflows are already active on the generated
 If the promotion workflow is not yet present on the base branch, use the explicit bootstrap flow instead:
 
 ```bash
-npx patchlane@0.4.0 bootstrap
-npx patchlane@0.4.0 bootstrap --wait
+npx patchlane@0.4 bootstrap
+npx patchlane@0.4 bootstrap --wait
 ```
 
 After promotion, confirm that scheduled syncs load their defaults from `.patchlane.yml`. Legacy environment variables may remain temporarily as per-run overrides, but remove duplicated committed values once the config-backed workflow is active.
