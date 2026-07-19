@@ -97,6 +97,8 @@ npx patchlane verify-auth
 
 This dispatches `sync-upstream.yml` with `no_push=true`, finds the newly created run, and waits for it to finish. A successful run validates the uploaded App key, installation, requested permissions, API access, authenticated checkout, and Patchlane rebuild without changing a branch. Use `--timeout <seconds>` and `--poll-interval <seconds>` to override the 60-second discovery timeout and 2-second polling interval. The equivalent environment variables are `PATCHLANE_AUTH_TIMEOUT_SECONDS` and `PATCHLANE_AUTH_POLL_INTERVAL_SECONDS`.
 
+GitHub operations resolve the fork from the configured `origin` push URL, independently of `gh repo set-default`. Use `--origin-remote-name <name>` for a differently named push remote or `--repository <owner/repo>` to override repository detection.
+
 ### Validate or publish a sync
 
 ```bash

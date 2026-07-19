@@ -1,5 +1,6 @@
 import { loadPatchlaneConfig } from './config.js';
 import { runDoctor } from './doctor.js';
+import { resolveForkRepository } from './github-repository.js';
 import { runIntegrationSync } from './integration-sync.js';
 import { runPromoteSync } from './promote-sync.js';
 import { git, run } from './subprocess.js';
@@ -11,6 +12,8 @@ const CI_PROGRESS_INTERVAL_MS = 60_000;
 type BootstrapOptions = {
 	publish?: boolean;
 	wait?: boolean;
+	repository?: string;
+	originRemoteName?: string;
 	ciTimeoutSeconds?: number;
 	ciPollIntervalSeconds?: number;
 	cwd?: string;
@@ -136,7 +139,7 @@ export async function bootstrapPatchlane(options: BootstrapOptions = {}) {
 	const report = runDoctor({ cwd });
 	if (!report.ok) throw new Error('Fix the Patchlane doctor errors before bootstrapping.');
 
-	const originRemoteName = process.env.ORIGIN_REMOTE_NAME ?? 'origin';
+	const originRemoteName = options.originRemoteName ?? process.env.ORIGIN_REMOTE_NAME ?? 'origin';
 	const syncOptions = {
 		upstreamOwner: config.upstreamOwner,
 		upstreamRepo: config.upstreamRepo,
@@ -157,7 +160,12 @@ export async function bootstrapPatchlane(options: BootstrapOptions = {}) {
 		return { status: 'validated' as const };
 	}
 
-	process.stdout.write(`Publishing ${config.syncBranch} for CI.\n`);
+	const repository = resolveForkRepository({
+		cwd,
+		repository: options.repository,
+		originRemoteName,
+	});
+	process.stdout.write(`Publishing ${config.syncBranch} to ${repository} for CI.\n`);
 	runIntegrationSync(syncOptions);
 	const syncSha = publishedSyncSha(originRemoteName, config.syncBranch, cwd);
 	if (!options.wait) {
@@ -179,15 +187,7 @@ export async function bootstrapPatchlane(options: BootstrapOptions = {}) {
 		DEFAULT_CI_POLL_INTERVAL_SECONDS,
 		'CI poll interval',
 	);
-	const repositoryResult = run('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], cwd);
-	if (repositoryResult.status !== 0 || !repositoryResult.stdout) {
-		throw new Error(
-			`Could not determine the GitHub repository: ${repositoryResult.stderr || repositoryResult.stdout || 'unknown error'}`,
-		);
-	}
-	const repository = repositoryResult.stdout;
-
-	process.stdout.write(`Waiting for '${ciWorkflow}' to test ${syncSha}.\n`);
+	process.stdout.write(`Waiting for '${ciWorkflow}' to test ${syncSha} in ${repository}.\n`);
 	const runId = await waitForCiRun(
 		repository,
 		ciWorkflow,
@@ -197,7 +197,7 @@ export async function bootstrapPatchlane(options: BootstrapOptions = {}) {
 		timeoutSeconds,
 		pollIntervalSeconds,
 	);
-	const watch = run('gh', ['run', 'watch', runId, '--exit-status'], cwd);
+	const watch = run('gh', ['run', 'watch', runId, '--repo', repository, '--exit-status'], cwd);
 	if (watch.stdout) process.stdout.write(`${watch.stdout}\n`);
 	if (watch.stderr) process.stderr.write(`${watch.stderr}\n`);
 	if (watch.status !== 0) throw new Error(`CI run ${runId} did not succeed; refusing to promote.`);

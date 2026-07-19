@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import type { NotificationEvent, PatchlaneConfig } from './config.js';
+import { resolveForkRepository } from './github-repository.js';
 
 type GithubIssue = {
 	number: number;
@@ -22,6 +23,8 @@ export type NotificationOptions = {
 	repository?: string;
 	status?: string;
 	runUrl?: string;
+	cwd?: string;
+	originRemoteName?: string;
 	upstreamSource?: string;
 	upstreamSha?: string;
 	syncSha?: string;
@@ -48,17 +51,6 @@ function runGithub(args: string[]) {
 		);
 	}
 	return result.stdout;
-}
-
-function parseRepositoryFromOrigin() {
-	const result = spawnSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' });
-	if (result.status !== 0) return undefined;
-	const match = result.stdout.trim().match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?$/);
-	return match ? `${match[1]}/${match[2]}` : undefined;
-}
-
-function currentRepository(explicit?: string) {
-	return explicit || process.env.GITHUB_REPOSITORY || parseRepositoryFromOrigin();
 }
 
 function eventName(event: NotificationEvent) {
@@ -146,11 +138,17 @@ export function runNotification(
 	if (!provider.events.includes(options.event)) return { status: 'disabled' };
 	if (options.recovered && !provider.closeOnRecovery) return { status: 'closed-without-notification' };
 
-	const repository = currentRepository(options.repository);
-	if (!repository) {
-		const error = 'Could not determine the current GitHub repository.';
-		warn(error);
-		return { status: 'failed', error };
+	let repository: string;
+	try {
+		repository = resolveForkRepository({
+			cwd: options.cwd ?? process.cwd(),
+			repository: options.repository,
+			originRemoteName: options.originRemoteName ?? process.env.ORIGIN_REMOTE_NAME,
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		warn(message);
+		return { status: 'failed', error: message };
 	}
 
 	const github = dependencies.github ?? runGithub;
