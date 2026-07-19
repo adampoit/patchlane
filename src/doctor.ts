@@ -245,6 +245,11 @@ function jobSteps(job: Record<string, unknown> | undefined) {
 	return Array.isArray(steps) ? steps.flatMap((step) => (objectValue(step) ? [objectValue(step)!] : [])) : [];
 }
 
+function invokesPatchlaneCommand(job: Record<string, unknown>, command: string) {
+	const pattern = new RegExp(`\\bpatchlane(?:@[^\\s]+)?\\s+${command}\\b`);
+	return jobSteps(job).some((step) => typeof step.run === 'string' && pattern.test(step.run));
+}
+
 type AuthenticationProvider = 'direct' | 'wrapper';
 
 export function inspectAuthenticatedJob(
@@ -336,6 +341,37 @@ export function inspectAuthenticatedJob(
 	return directProvider ? 'direct' : 'wrapper';
 }
 
+export function inspectAuthenticatedCommandJob(
+	workflowFile: string,
+	workflow: Record<string, unknown>,
+	command: string,
+	requirements: { contents: 'read' | 'write'; workflows?: boolean; issues?: boolean },
+	checks: DoctorCheck[],
+): AuthenticationProvider | undefined {
+	const candidates = Object.entries(objectValue(workflow.jobs) ?? {}).flatMap(([jobName, value]) => {
+		const job = objectValue(value);
+		return job && invokesPatchlaneCommand(job, command) ? [{ jobName, job }] : [];
+	});
+	if (candidates.length === 0) {
+		checks.push({
+			severity: 'error',
+			message: `${workflowFile} must define a job that invokes 'patchlane ${command}'.`,
+		});
+		return undefined;
+	}
+	if (candidates.length > 1) {
+		const jobNames = candidates.map(({ jobName }) => `'${jobName}'`).join(', ');
+		checks.push({
+			severity: 'error',
+			message: `${workflowFile} must define exactly one job that invokes 'patchlane ${command}'; found ${jobNames}.`,
+		});
+		return undefined;
+	}
+
+	const [{ jobName, job }] = candidates;
+	return inspectAuthenticatedJob(workflowFile, jobName, job, requirements, checks);
+}
+
 function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined, cwd: string, checks: DoctorCheck[]) {
 	const authenticationProviders: AuthenticationProvider[] = [];
 	const files = workflowFiles(config, sourceSha, cwd);
@@ -352,10 +388,10 @@ function inspectWorkflows(config: PatchlaneConfig, sourceSha: string | undefined
 	const promotionNotifications = config.notifications?.githubIssues.events.includes('promotion-failed') ?? false;
 	if (!sync?.workflow) checks.push({ severity: 'error', message: 'Missing .github/workflows/sync-upstream.yml.' });
 	else {
-		const provider = inspectAuthenticatedJob(
+		const provider = inspectAuthenticatedCommandJob(
 			'.github/workflows/sync-upstream.yml',
-			'fork-sync',
-			workflowJob(sync.workflow, 'fork-sync'),
+			sync.workflow,
+			'sync',
 			{ contents: 'write', workflows: true, issues: syncNotifications },
 			checks,
 		);

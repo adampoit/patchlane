@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { inspectAuthenticatedJob, inspectGitHubAutomation, runDoctor, type DoctorCheck } from '../src/doctor.js';
+import {
+	inspectAuthenticatedCommandJob,
+	inspectAuthenticatedJob,
+	inspectGitHubAutomation,
+	runDoctor,
+	type DoctorCheck,
+} from '../src/doctor.js';
 import type { PatchlaneConfig } from '../src/config.js';
 import { renderPromotionWorkflow, renderSyncWorkflow } from '../src/workflow-templates.js';
 
@@ -215,6 +221,60 @@ describe('inspectAuthenticatedJob', () => {
 		expect(inspectJob(job)).toContainEqual(
 			expect.objectContaining({ message: expect.stringContaining('must pass the Patchlane GitHub App token') }),
 		);
+	});
+});
+
+describe('inspectAuthenticatedCommandJob', () => {
+	function inspectJobs(jobs: Record<string, unknown>) {
+		const checks: DoctorCheck[] = [];
+		inspectAuthenticatedCommandJob(
+			'.github/workflows/sync-upstream.yml',
+			{ jobs },
+			'sync',
+			{ contents: 'write', workflows: true, issues: true },
+			checks,
+		);
+		return checks;
+	}
+
+	test('accepts a direct GitHub App action in a custom sync job', () => {
+		expect(inspectJobs({ sync: authenticatedJob() })).toEqual([]);
+	});
+
+	test('accepts a wrapper action in a custom sync job', () => {
+		expect(
+			inspectJobs({
+				update: authenticatedJob({
+					tokenStepId: 'not-adam',
+					tokenUses: 'adampoit/not-adam@v1',
+					tokenWith: {},
+				}),
+			}),
+		).toEqual([
+			{
+				severity: 'info',
+				message: expect.stringContaining("job 'update' uses token wrapper 'adampoit/not-adam@v1'"),
+			},
+		]);
+	});
+
+	test('reports a missing sync command job', () => {
+		expect(inspectJobs({ build: { steps: [{ run: 'npm test' }] } })).toEqual([
+			{
+				severity: 'error',
+				message: ".github/workflows/sync-upstream.yml must define a job that invokes 'patchlane sync'.",
+			},
+		]);
+	});
+
+	test('reports ambiguous sync command jobs', () => {
+		expect(inspectJobs({ first: authenticatedJob(), second: authenticatedJob() })).toEqual([
+			{
+				severity: 'error',
+				message:
+					".github/workflows/sync-upstream.yml must define exactly one job that invokes 'patchlane sync'; found 'first', 'second'.",
+			},
+		]);
 	});
 });
 
