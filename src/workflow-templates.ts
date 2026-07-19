@@ -48,7 +48,6 @@ export function renderSyncWorkflow(config: PatchlaneConfig, packageVersion: stri
 	const notifyFailures = hasEvent(config, 'sync-failed');
 	const notifyRecovery = notifyFailures && closeOnRecovery(config);
 	return `name: Sync Upstream Integration
-run-name: \${{ inputs.verification_id && format('Verify Patchlane authentication ({0})', inputs.verification_id) || 'Sync Upstream Integration' }}
 
 on:
   schedule:
@@ -67,11 +66,6 @@ on:
         default: ""
       patch_refs:
         description: Override the configured comma-separated patch branches.
-        type: string
-        required: false
-        default: ""
-      verification_id:
-        description: Correlate a Patchlane authentication check run.
         type: string
         required: false
         default: ""

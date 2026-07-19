@@ -50,18 +50,26 @@ CLI flags and environment variables override config values for one run. Legacy `
 
 GitHub issue notifications are optional. Patchlane keeps one issue per failure event, updates it on repeated failures, assigns configured users individually, and closes it after a successful run when `closeOnRecovery` is enabled. The generated App tokens request `issues: write` only when they handle an enabled GitHub issue event. Notification API errors are warnings and do not replace the sync, CI, or promotion result.
 
-## GitHub App authentication
+## Workflow authentication
 
-The generated workflows require:
+Patchlane automation needs a token that can push repository contents, update workflow files, and start the downstream workflows triggered by those pushes. Enable issue access when GitHub issue notifications are configured. The built-in `GITHUB_TOKEN` is not suitable because GitHub deliberately suppresses most workflow events caused by it; increasing its workflow permissions does not change that behavior.
+
+The generated workflows use `actions/create-github-app-token` with:
 
 - repository variable `PATCHLANE_APP_CLIENT_ID`
 - repository secret `PATCHLANE_APP_PRIVATE_KEY`
 
-The App installation must grant Contents read/write and Workflows write. Enable Issues read/write when GitHub issue notifications are configured. Patchlane requests these permissions explicitly when creating each short-lived token, passes the token to checkout and `gh` as `GH_TOKEN`, and leaves the built-in `GITHUB_TOKEN` read-only.
+The App installation must grant Contents read/write and Workflows write, plus Issues read/write when notifications are enabled. Generated jobs request the required least-privilege permissions explicitly, pass the token to checkout and `gh` as `GH_TOKEN`, and leave the built-in `GITHUB_TOKEN` read-only.
 
-Adapted workflows may instead use a composite action that creates the App token and exposes it as `outputs.token`. Checkout and every `patchlane sync`, `promote`, or `notify` step in a job must consume the same `${{ steps.<id>.outputs.token }}` expression. No wrapper details belong in `.patchlane.yml`. Doctor validates this token flow but cannot inspect the wrapper's internal permission requests or credentials; use `verify-auth` for runtime validation. Generated workflows continue to use `actions/create-github-app-token` directly with the standard credentials and explicit least-privilege permissions.
+Adapted workflows may use another authentication source selected by the maintainer:
 
-A GitHub App or user token is required for pushes that must start another workflow. GitHub deliberately suppresses most workflow events caused by the built-in `GITHUB_TOKEN`; increasing its workflow permissions does not change that behavior. See [Manual setup](manual-setup.md) for App creation and repository configuration.
+- an action step that exposes a token output;
+- a `run` step that writes a token output to `GITHUB_OUTPUT`; or
+- an Actions secret containing a suitable GitHub App or user token.
+
+For a step output, checkout must use an expression in the form `${{ steps.<id>.outputs.<name> }}`. For a stored token, it must use `${{ secrets.<name> }}`. Every `patchlane sync`, `promote`, or `notify` step in that job must receive the exact same expression as `GH_TOKEN`. Compound expressions, environment indirection, `github.token`, and `secrets.GITHUB_TOKEN` are not accepted. Authentication implementation details do not belong in `.patchlane.yml`.
+
+Doctor strictly checks credentials and requested permissions when `actions/create-github-app-token` is used directly. For other sources it validates only the token data flow because it cannot determine statically how the token is minted or which capabilities it has. Confirm custom authentication with the first workflow-driven published sync, including its downstream CI run and promotion. See [Manual setup](manual-setup.md) for the generated GitHub App setup.
 
 ## Commands
 
@@ -85,17 +93,7 @@ npx patchlane doctor
 npx patchlane doctor --json
 ```
 
-Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, App-token wiring, permissions, and bootstrap state without changing repository state. For GitHub origins it also attempts to inspect Actions enablement. When a job uses `actions/create-github-app-token` directly, Doctor additionally inspects the names—not values—of the expected repository variable and secret and strictly validates the action's credential and permission inputs. These direct-provider metadata checks are skipped for wrapper-only workflows. Insufficient metadata access is reported as a warning.
-
-### Verify workflow authentication
-
-After the generated workflows are present on the base branch, run:
-
-```bash
-npx patchlane verify-auth
-```
-
-This dispatches `sync-upstream.yml` with `no_push=true`, finds the newly created run, and waits for it to finish. A successful run validates the uploaded App key, installation, requested permissions, API access, authenticated checkout, and Patchlane rebuild without changing a branch. Use `--timeout <seconds>` and `--poll-interval <seconds>` to override the 60-second discovery timeout and 2-second polling interval. The equivalent environment variables are `PATCHLANE_AUTH_TIMEOUT_SECONDS` and `PATCHLANE_AUTH_POLL_INTERVAL_SECONDS`.
+Doctor checks source resolution, remote patch refs, patch bases, composed workflow configuration and policy, CI triggers, authentication-token wiring, permissions, and bootstrap state without changing repository state. For GitHub origins it also attempts to inspect Actions enablement. When a job uses `actions/create-github-app-token` directly, Doctor additionally inspects the names—not values—of the expected repository variable and secret and strictly validates the action's credential and permission inputs. These standard credential metadata checks are skipped when all jobs use custom token sources. Insufficient metadata access is reported as a warning.
 
 GitHub operations resolve the fork from the configured `origin` push URL, independently of `gh repo set-default`. Use `--origin-remote-name <name>` for a differently named push remote or `--repository <owner/repo>` to override repository detection.
 
