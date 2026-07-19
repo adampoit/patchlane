@@ -10,7 +10,6 @@ import { getPackageVersion } from './package-version.js';
 import { runNotification } from './notify.js';
 import { runPromoteSync } from './promote-sync.js';
 import { parseUpstreamSource } from './upstream-source.js';
-import { verifyGitHubAuth } from './verify-auth.js';
 
 const cli = cac('patchlane');
 
@@ -105,29 +104,6 @@ cli.command('doctor', 'Check Patchlane configuration without changing repository
 	.action((args) => {
 		const report = runDoctor({ json: args.json === true });
 		if (!report.ok) process.exitCode = 1;
-	});
-
-cli.command('verify-auth', 'Dispatch a no-push sync to verify GitHub App authentication')
-	.option('--repository <owner/repo>', 'Fork GitHub repository; inferred from the origin push target')
-	.option('--origin-remote-name <name>', 'Name of the origin remote', {
-		default: env('ORIGIN_REMOTE_NAME', 'origin'),
-	})
-	.option('--timeout <seconds>', 'Maximum time to wait for the workflow run to appear', {
-		default: env('PATCHLANE_AUTH_TIMEOUT_SECONDS'),
-	})
-	.option('--poll-interval <seconds>', 'Interval between workflow run lookups', {
-		default: env('PATCHLANE_AUTH_POLL_INTERVAL_SECONDS'),
-	})
-	.action((args) => {
-		void verifyGitHubAuth({
-			repository: args.repository,
-			originRemoteName: args.originRemoteName,
-			timeoutSeconds: args.timeout === undefined ? undefined : Number(args.timeout),
-			pollIntervalSeconds: args.pollInterval === undefined ? undefined : Number(args.pollInterval),
-		}).catch((error: unknown) => {
-			process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-			process.exit(1);
-		});
 	});
 
 cli.command('sync', 'Rebuild integration branch from upstream and patches')

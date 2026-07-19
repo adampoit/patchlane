@@ -22,20 +22,26 @@ Resolve and show the source tag or branch and commit SHA. Before pushing or rewr
 
 ## Configure GitHub authentication
 
-Treat working GitHub App authentication as a setup prerequisite. The built-in `GITHUB_TOKEN` is not sufficient: GitHub suppresses most workflow events caused by it, so its pushes do not reliably start integration CI or the promotion chain.
+Treat working workflow authentication as a setup prerequisite. The token must be able to push repository contents, update workflow files, and start downstream workflows. Enable issue access when GitHub issue notifications are configured. The built-in `GITHUB_TOKEN` is not sufficient because GitHub suppresses most workflow events caused by it.
 
-1. Inspect existing workflows and repository secret/variable names for an established GitHub App pattern. Ask whether the user wants to reuse that App or create one; do not silently select an identity.
-2. Require the App installation to grant Contents read/write and Workflows write. Require Issues read/write only when GitHub issue notifications are enabled. Actions write is not required.
-3. Use the standard repository variable `PATCHLANE_APP_CLIENT_ID` and repository secret `PATCHLANE_APP_PRIVATE_KEY`. An existing App identity can be reused through these names even when other workflows wrap it in a custom action.
-4. App creation, permission approval, installation, and private-key generation require the user. Never ask them to paste a private key into chat or print it. After explicit approval, the agent may configure a variable and secret from a local key file with `gh variable set` and `gh secret set`.
-5. Check deterministically where possible:
-    - `gh auth status`
-    - `gh api repos/OWNER/REPO/actions/permissions`
-    - `gh variable get PATCHLANE_APP_CLIENT_ID --repo OWNER/REPO`
-    - `gh secret list --repo OWNER/REPO --json name,updatedAt`
-6. Explain that secret metadata proves only that a secret exists. The generated `actions/create-github-app-token` step verifies the installation and requested permissions at runtime.
+Inspect existing workflows and available repository secret and variable names. Show what authentication is already established, then ask the user to choose an approach; do not silently select an identity or credential source:
 
-Include all external repository changes in the plan and obtain confirmation before setting variables, secrets, or dispatching workflows.
+1. Use Patchlane's generated `actions/create-github-app-token` setup.
+2. Preserve an existing token source and its inputs, output name, and secret names.
+3. Use another action or `run` step selected by the user to produce a token output.
+4. Use an Actions secret containing a suitable GitHub App or user token.
+
+For the generated setup, use repository variable `PATCHLANE_APP_CLIENT_ID` and repository secret `PATCHLANE_APP_PRIVATE_KEY`. Require the App installation to grant Contents read/write and Workflows write, plus Issues read/write when notifications are enabled. Actions write is not required.
+
+For another source, do not require the standard variable or secret names. A producing step must have an `id` and expose `${{ steps.<id>.outputs.<name> }}`; a stored token must use `${{ secrets.<name> }}`. Checkout and every `patchlane sync`, `promote`, or `notify` command in the job must consume the exact same expression. Do not use compound expressions, environment indirection, `github.token`, or `secrets.GITHUB_TOKEN`. Explain that Doctor can validate custom token wiring but not how the token is minted or which capabilities it has. Confirm write access and downstream workflow triggering with the first workflow-driven published sync, including its downstream CI run and promotion.
+
+Credential creation, permission approval, App installation, and private-key generation require the user. Never ask them to paste a token or private key into chat or print one. After explicit approval, the agent may configure repository variables and secrets from local files. Check deterministically where possible:
+
+- `gh auth status`
+- `gh api repos/OWNER/REPO/actions/permissions`
+- the metadata for variables and secrets used by the selected approach
+
+Secret metadata proves only that a secret exists. Include all external repository changes in the plan and obtain confirmation before setting variables, secrets, or dispatching workflows.
 
 ## Configure the fork
 
@@ -44,7 +50,7 @@ Include all external repository changes in the plan and obtain confirmation befo
 3. Prefer the order `patch/sync`, `patch/ci`, then product-specific patches. Foundational changes must precede patches that depend on them.
 4. Put `.patchlane.yml`, Patchlane workflows, and installed `.agents/skills` on `patch/sync`.
 5. Put only the existing CI trigger adjustment on `patch/ci`. Preserve the existing workflow's `name`; configure `ciWorkflow` and the promotion workflow to reference that exact name. Add the CI filename and every other intentionally retained repository workflow to `allowedWorkflows`; Patchlane adds its generated sync and promotion workflows implicitly.
-6. Use `npx patchlane init` to generate `.patchlane.yml` and pinned workflow files when practical, then adapt rather than replace existing repository conventions. Preserve the generated GitHub App token creation, explicit permission requests, authenticated checkout, and `GH_TOKEN` wiring.
+6. Use `npx patchlane init` to generate `.patchlane.yml` and pinned workflow files when practical, then adapt rather than replace existing repository conventions. Preserve the user's selected authentication source, authenticated checkout, and matching `GH_TOKEN` wiring. For the generated GitHub App source, also preserve its explicit permission requests.
 7. Ensure fork CI covers normal pull requests plus pushes to both the generated base and sync branches.
 
 Use the bundled assets as invariants when adapting workflows:
@@ -81,10 +87,7 @@ The workflows do not exist on the default branch before the first promotion. Boo
 2. After user approval, run `npx patchlane bootstrap --publish` and wait for the configured CI workflow.
 3. Promote the exact successful SHA printed by bootstrap, or use `npx patchlane bootstrap --wait` to wait and promote automatically.
 4. Confirm the generated base is rooted at the selected source.
-5. After the workflows are present on the base branch, obtain approval and run `npx patchlane verify-auth`. This dispatches a no-push sync and waits for it, validating the uploaded App key, installation, permissions, API access, checkout, and rebuild without changing branches.
-6. On the first App-authenticated published sync, confirm CI ran as a `push` for the exact integration SHA and promotion moved the base branch to that SHA.
-
-After bootstrap, a remote no-push test can be dispatched safely from the default branch.
+5. On the first workflow-driven sync that publishes a new integration SHA, confirm authentication succeeds, CI runs as a `push` for that exact SHA, and promotion moves the base branch to that SHA.
 
 ## Finish
 
@@ -96,4 +99,4 @@ Summarize:
 - files and workflows added or updated
 - doctor and dry-run results
 - bootstrap CI and promotion results
-- GitHub App metadata and post-bootstrap authentication verification results
+- selected authentication approach, relevant credential metadata, and first workflow-driven sync results

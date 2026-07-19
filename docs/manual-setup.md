@@ -4,9 +4,9 @@ This walkthrough configures an existing GitHub fork. You need Node.js 22+, `git`
 
 Already using an earlier Patchlane version? Follow the [migration guide](migrations.md) instead.
 
-## 1. Configure GitHub App authentication
+## 1. Configure the generated GitHub App authentication
 
-Patchlane must push as a GitHub App so pushes to `sync/integration` and the promoted base branch trigger their configured workflows. GitHub suppresses most workflow events caused by the built-in `GITHUB_TOKEN`, so granting that token `contents: write` is not sufficient.
+Patchlane's generated workflows push as a GitHub App so pushes to `sync/integration` and the promoted base branch trigger their configured workflows. GitHub suppresses most workflow events caused by the built-in `GITHUB_TOKEN`, so granting that token `contents: write` is not sufficient. Adapted workflows may use another token source that satisfies the contract in [Workflow authentication](configuration.md#workflow-authentication).
 
 Create or reuse a GitHub App, install it on the fork, and grant these repository permissions:
 
@@ -125,13 +125,7 @@ Then publish, wait for CI, and promote the exact successful SHA:
 npx patchlane bootstrap --wait
 ```
 
-After this succeeds, run the post-bootstrap authentication check:
-
-```bash
-npx patchlane verify-auth
-```
-
-This dispatches the sync workflow with `no_push=true`, waits for it, and fails if the App credentials, installation, requested permissions, API access, checkout, or rebuild are invalid. It does not change any branches. After it succeeds, scheduled syncs and automatic promotions are active.
+After bootstrap, scheduled syncs and automatic promotions are active. On the first workflow-driven sync that publishes a new integration SHA, confirm that authentication succeeds, CI runs as a `push` for that SHA, and promotion updates the base branch.
 
 ## Adding product patches
 
