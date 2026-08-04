@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -27,6 +27,34 @@ function configureUser(repo: string) {
 	git(['config', 'user.name', 'Patchlane Test'], repo);
 	git(['config', 'user.email', 'patchlane@example.test'], repo);
 }
+
+test('reports the installed package version', () => {
+	const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as { version: string };
+	const result = run('node', [cliPath, '--version'], repoRoot);
+
+	expect(result.status, result.stderr).toBe(0);
+	expect(result.stdout.trim()).toContain(`patchlane/${packageJson.version}`);
+});
+
+test('agents installs bundled skills without fetching GitHub', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-agents-'));
+	try {
+		const installDir = path.join(tempRoot, 'skills');
+		const env = { ...process.env };
+		delete env.PATCHLANE_SKILLS_BASE_URL;
+		delete env.PATCHLANE_SKILLS_REF;
+
+		const result = run('node', [cliPath, 'agents', '--dir', installDir], tempRoot, env);
+
+		expect(result.status, [result.stderr, result.stdout].filter(Boolean).join('\\n')).toBe(0);
+		expect(result.stdout).toContain('Using bundled Patchlane agent skills');
+		expect(readFileSync(path.join(installDir, 'patchlane-workspace', 'SKILL.md'), 'utf8')).toContain(
+			'Patchlane Composed Workspace',
+		);
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
 
 test('sync skip-push flags do not publish the generated branch', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-cli-'));

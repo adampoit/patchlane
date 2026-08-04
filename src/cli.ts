@@ -17,6 +17,7 @@ import { formatWorkspaceLand, formatWorkspaceLandJson, landWorkspace, WorkspaceL
 import { formatWorkspaceRemove, formatWorkspaceRemoveJson, removeWorkspace } from './workspace-remove.js';
 
 const cli = cac('patchlane');
+cli.version(getPackageVersion());
 
 let config: ReturnType<typeof loadPatchlaneConfig>;
 if (['sync', 'promote', 'notify'].includes(process.argv[2] ?? '')) {
@@ -51,7 +52,7 @@ cli.command('agents', 'Install or update Patchlane agent skills')
 		default: env('PATCHLANE_AGENTS_DIR', '.agents/skills'),
 	})
 	.option('--ref <git-ref>', 'Patchlane git ref to pull skills from', {
-				default: env('PATCHLANE_SKILLS_REF', `v${getPackageVersion()}`),
+		default: env('PATCHLANE_SKILLS_REF'),
 	})
 	.action((args) => {
 		void installPatchlaneAgents({
