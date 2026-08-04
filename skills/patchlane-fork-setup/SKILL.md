@@ -7,7 +7,7 @@ description: Set up or migrate a GitHub fork to use Patchlane upstream sync auto
 
 Inspect the fork before changing anything. Confirm the default branch, remotes, existing workflows, fork-only commits, and existing `patch/*` branches.
 
-Treat the promoted base branch as generated output. Keep fork-owned product changes, Patchlane configuration, agent skills, and workflows on focused patch branches.
+Treat the promoted base branch as generated output. Keep fork-owned product changes, Patchlane configuration, agent skills, and workflows on focused patch branches. When an agent needs to make a change, prefer a composed workspace over editing a raw patch branch.
 
 ## Confirm the plan
 
@@ -88,6 +88,16 @@ The workflows do not exist on the default branch before the first promotion. Boo
 3. Promote the exact successful SHA printed by bootstrap, or use `npx patchlane bootstrap --wait` to wait and promote automatically.
 4. Confirm the generated base is rooted at the selected source.
 5. On the first workflow-driven sync that publishes a new integration SHA, confirm authentication succeeds, CI runs as a `push` for that exact SHA, and promotion moves the base branch to that SHA.
+
+## Agent workspaces
+
+After the fork has a valid composition, agents should create complete worktrees instead of editing a raw lane directly:
+
+```bash
+npx patchlane workspace create --lane patch/product
+```
+
+The workspace includes every configured lane, Patchlane skills, CI, tests, and local tooling. Make linear commits in the reported worktree, run the repository tests, then validate with `npx patchlane workspace land --dry-run`. The selected lane is the only landing destination; inspect round-trip mismatch diagnostics rather than assigning files heuristically. Use `workspace land --push` only after explicit approval. See `docs/workspaces.md` in the repository or the `patchlane-workspace` skill for the complete workflow.
 
 ## Finish
 

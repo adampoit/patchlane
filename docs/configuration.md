@@ -150,6 +150,22 @@ npx patchlane notify --event=sync-failed --recovered
 
 The repository defaults to `GITHUB_REPOSITORY` in Actions or the GitHub `origin` remote locally. Structured context can be supplied with flags or the `PATCHLANE_STATUS`, `PATCHLANE_RUN_URL`, `UPSTREAM_SHA`, `SYNC_SHA`, `FAILED_PATCH_REF`, `FAILED_COMMIT`, `CONFLICT_PATHS`, and `APPLIED_PATCH_REFS` environment variables.
 
+### Composed workspaces
+
+Use a composed workspace for agent development instead of editing a raw patch branch:
+
+```bash
+npx patchlane workspace create --lane patch/product
+cd ../project-patch-product
+npx patchlane workspace status --json
+npx patchlane workspace land --dry-run
+npx patchlane workspace land                 # local lane only
+npx patchlane workspace land --push          # explicit remote write
+npx patchlane workspace remove
+```
+
+`workspace create` pins the source and every configured lane in local metadata under the Git common directory. Landing requires clean, linear history, checks that all pinned lane refs are fresh, replays commits onto exactly one lane, recomposes every lane, and requires an exact tree match. Use `--config-ref <ref>` when the current branch does not contain `.patchlane.yml`, and `workspace remove --force` only when intentionally discarding unlanded work.
+
 ### Install agent skills
 
 ```bash

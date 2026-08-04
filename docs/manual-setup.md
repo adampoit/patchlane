@@ -127,6 +127,25 @@ npx patchlane bootstrap --wait
 
 After bootstrap, scheduled syncs and automatic promotions are active. On the first workflow-driven sync that publishes a new integration SHA, confirm that authentication succeeds, CI runs as a `push` for that SHA, and promotion updates the base branch.
 
+## Agent development with composed workspaces
+
+Once the configured composition is valid, agents should work from a complete workspace rather than a raw patch branch:
+
+```bash
+npx patchlane workspace create --lane patch/product
+cd ../REPOSITORY-patch-product
+npx patchlane workspace status --json
+```
+
+Make and test linear commits in the generated worktree. Before landing, validate the projection and exact recomposition:
+
+```bash
+npx patchlane workspace land --dry-run
+npx patchlane workspace land
+```
+
+Use `--push` only with explicit approval. A stale lane, projection conflict, or round-trip mismatch leaves configured lane refs unchanged and should be resolved rather than bypassed.
+
 ## Adding product patches
 
 Create each additional patch independently from the same selected source:

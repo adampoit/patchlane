@@ -2,6 +2,7 @@
 import cac from 'cac';
 import { installPatchlaneAgents } from './agents-install.js';
 import { bootstrapPatchlane } from './bootstrap.js';
+import { CompositionError } from './composition-errors.js';
 import { loadPatchlaneConfig, NOTIFICATION_EVENTS, type NotificationEvent } from './config.js';
 import { runDoctor } from './doctor.js';
 import { initializePatchlane } from './init.js';
@@ -10,6 +11,10 @@ import { getPackageVersion } from './package-version.js';
 import { runNotification } from './notify.js';
 import { runPromoteSync } from './promote-sync.js';
 import { parseUpstreamSource } from './upstream-source.js';
+import { createWorkspace, formatWorkspaceCreateJson, formatWorkspaceCreateResult } from './workspace-create.js';
+import { formatWorkspaceStatus, formatWorkspaceStatusJson, inspectWorkspaceStatus } from './workspace-status.js';
+import { formatWorkspaceLand, formatWorkspaceLandJson, landWorkspace, WorkspaceLandError } from './workspace-land.js';
+import { formatWorkspaceRemove, formatWorkspaceRemoveJson, removeWorkspace } from './workspace-remove.js';
 
 const cli = cac('patchlane');
 
@@ -27,12 +32,26 @@ function env(name: string, fallback?: string) {
 	return process.env[name] || fallback;
 }
 
+function workspaceError(error: unknown, json: boolean) {
+	const message = error instanceof Error ? error.message : String(error);
+	if (json) {
+		const structured = error instanceof WorkspaceLandError || error instanceof CompositionError ? error : undefined;
+		const details = structured?.details;
+		process.stdout.write(
+			`${JSON.stringify({ status: structured?.code ?? 'error', message, ...(details ? { ...details } : {}) }, null, 2)}\n`,
+		);
+	} else {
+		process.stderr.write(`${message}\n`);
+	}
+	process.exitCode = 1;
+}
+
 cli.command('agents', 'Install or update Patchlane agent skills')
 	.option('--dir <path>', 'Destination directory for installed skills', {
 		default: env('PATCHLANE_AGENTS_DIR', '.agents/skills'),
 	})
 	.option('--ref <git-ref>', 'Patchlane git ref to pull skills from', {
-		default: env('PATCHLANE_SKILLS_REF', `v${getPackageVersion()}`),
+				default: env('PATCHLANE_SKILLS_REF', `v${getPackageVersion()}`),
 	})
 	.action((args) => {
 		void installPatchlaneAgents({
@@ -104,6 +123,70 @@ cli.command('doctor', 'Check Patchlane configuration without changing repository
 	.action((args) => {
 		const report = runDoctor({ json: args.json === true });
 		if (!report.ok) process.exitCode = 1;
+	});
+
+cli.command('workspace <action>', 'Create, inspect, land, or remove a composed Patchlane workspace')
+	.option('--lane <ref>', 'Configured target lane or landing override')
+	.option('--path <directory>', 'Destination worktree path')
+	.option('--name <name>', 'Workspace identifier')
+	.option('--source <source>', 'Override the configured upstream source')
+	.option('--config-ref <ref>', 'Read .patchlane.yml from a Git ref')
+	.option('--origin-remote-name <name>', 'Name of the origin remote', {
+		default: env('ORIGIN_REMOTE_NAME', 'origin'),
+	})
+	.option('--upstream-remote-name <name>', 'Name of the upstream remote', {
+		default: env('UPSTREAM_REMOTE_NAME', 'upstream'),
+	})
+	.option('--dry-run', 'Validate landing without updating lane refs')
+	.option('--push', 'Push the updated lane with force-with-lease')
+	.option('--force', 'Remove even when the workspace is dirty or has unlanded commits')
+	.option('--json', 'Emit a machine-readable result')
+	.action((action, args) => {
+		try {
+			if (action === 'create') {
+				if (!args.lane) throw new Error('Error: --lane is required.');
+				const result = createWorkspace({
+					lane: args.lane,
+					path: args.path,
+					name: args.name,
+					source: args.source,
+					configRef: args.configRef,
+					originRemoteName: args.originRemoteName,
+					upstreamRemoteName: args.upstreamRemoteName,
+					upstreamRemoteUrl: env('UPSTREAM_REMOTE_URL'),
+				});
+				process.stdout.write(
+					`${args.json ? formatWorkspaceCreateJson(result) : formatWorkspaceCreateResult(result)}\n`,
+				);
+				return;
+			}
+			if (action === 'status') {
+				const result = inspectWorkspaceStatus();
+				process.stdout.write(
+					`${args.json ? formatWorkspaceStatusJson(result) : formatWorkspaceStatus(result)}\n`,
+				);
+				return;
+			}
+			if (action === 'land') {
+				const result = landWorkspace({
+					lane: args.lane,
+					dryRun: args.dryRun === true,
+					push: args.push === true,
+				});
+				process.stdout.write(`${args.json ? formatWorkspaceLandJson(result) : formatWorkspaceLand(result)}\n`);
+				return;
+			}
+			if (action === 'remove') {
+				const result = removeWorkspace({ force: args.force === true });
+				process.stdout.write(
+					`${args.json ? formatWorkspaceRemoveJson(result) : formatWorkspaceRemove(result)}\n`,
+				);
+				return;
+			}
+			throw new Error(`Unknown workspace action '${action}'. Use create, status, land, or remove.`);
+		} catch (error) {
+			workspaceError(error, args.json === true);
+		}
 	});
 
 cli.command('sync', 'Rebuild integration branch from upstream and patches')
