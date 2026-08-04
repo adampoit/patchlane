@@ -53,6 +53,8 @@ npm install
 npm test
 ```
 
+Model-backed skill evals are opt-in; see [evals/README.md](evals/README.md).
+
 ## License
 
 MIT
