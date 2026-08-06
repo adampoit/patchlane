@@ -2,7 +2,7 @@
 
 These evals run a real pi worker agent against disposable local Git repositories. A separate pi user-driver agent supplies the next natural user message, asks for clarification, approves only authorized actions, and ends the conversation when it is complete, blocked, or unsafe. The driver has no repository or shell tools; deterministic Git, file, workflow, and command-outcome checks remain the source of truth for pass/fail.
 
-They are intentionally opt-in because each run makes model requests. The npm publication workflow runs the full suite once as a fail-fast gate; routine CI does not run live evals.
+They are intentionally opt-in because each run makes model requests. The draft-release workflow runs the full suite once as a fail-fast gate before creating a draft GitHub release; routine CI does not run live evals.
 
 ```bash
 npm run evals -- --scenario setup

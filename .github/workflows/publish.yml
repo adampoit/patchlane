@@ -33,29 +33,5 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Run publication eval gate
-        id: evals
-        env:
-          PATCHLANE_EVAL_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          TMPDIR: ${{ runner.temp }}
-        run: |
-          set -o pipefail
-          npm run evals -- \
-            --scenario all \
-            --fail-fast \
-            2>&1 | tee "${RUNNER_TEMP}/patchlane-evals.log"
-
-      - name: Upload failed eval artifacts
-        if: ${{ failure() && steps.evals.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: failed-publication-evals
-          path: |
-            ${{ runner.temp }}/patchlane-evals.log
-            ${{ runner.temp }}/patchlane-*/pi-output.jsonl
-            ${{ runner.temp }}/patchlane-*/user-driver-transcript.json
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Publish to npm
         run: npm publish
