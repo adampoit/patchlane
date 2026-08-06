@@ -9,6 +9,16 @@ Inspect the fork before changing anything. Confirm the default branch, remotes, 
 
 Treat the promoted base branch as generated output. Keep fork-owned product changes, Patchlane configuration, agent skills, and workflows on focused patch branches. When an agent needs to make a change, prefer a composed workspace over editing a raw patch branch.
 
+## Interaction contract
+
+- Inspect before mutating. The initial setup request is not approval to change files, refs, remotes, credentials, or external settings.
+- Present one concise plan and ask for approval before mutation. Name every local ref to create or rewrite and every remote ref to publish.
+- Treat approval as scoped to the presented plan. If the plan changes, stop and obtain new approval.
+- Do not ask the user to choose implementation details unless the choice affects external access, credentials, or data safety.
+- After clear approval, execute only the approved plan and validate the resulting state.
+- Do not treat local setup approval as permission to push. Publishing is authorized only when the approved plan explicitly names the destination and refs.
+- Treat bootstrap publication, workflow dispatch, credential changes, and other external actions as separate approval boundaries unless the approved plan explicitly includes them.
+
 ## Confirm the plan
 
 Ask the user which upstream source to track. Do not infer this from version files or from whichever branch is currently checked out.
@@ -24,7 +34,7 @@ Resolve and show the source tag or branch and commit SHA. Before pushing or rewr
 
 Treat working workflow authentication as a setup prerequisite. The token must be able to push repository contents, update workflow files, and start downstream workflows. Enable issue access when GitHub issue notifications are configured. The built-in `GITHUB_TOKEN` is not sufficient because GitHub suppresses most workflow events caused by it.
 
-Inspect existing workflows and available repository secret and variable names. Show what authentication is already established, then ask the user to choose an approach; do not silently select an identity or credential source:
+Inspect existing workflows and available repository secret and variable names. Show what authentication is already established. If no authentication source is configured and the user has not selected one, propose Patchlane's generated GitHub App wiring as the default in the plan. If the user explicitly requests the default wiring, include that choice in the plan and do not ask them to choose again. Do not configure credentials or external repository settings without approval:
 
 1. Use Patchlane's generated `actions/create-github-app-token` setup.
 2. Preserve an existing token source and its inputs, output name, and secret names.

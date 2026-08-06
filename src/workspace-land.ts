@@ -30,11 +30,7 @@ export type WorkspaceLandResult = {
 };
 
 export type WorkspaceLandErrorCode =
-	| 'workspace_stale'
-	| 'workspace_invalid'
-	| 'workspace_conflict'
-	| 'round_trip_mismatch'
-	| 'push_failed';
+	'workspace_stale' | 'workspace_invalid' | 'workspace_conflict' | 'round_trip_mismatch' | 'push_failed';
 
 export class WorkspaceLandError extends Error {
 	readonly name = 'WorkspaceLandError';

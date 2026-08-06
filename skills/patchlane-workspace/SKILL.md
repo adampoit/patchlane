@@ -5,18 +5,20 @@ description: Develop Patchlane fork changes in a complete composed workspace, th
 
 # Patchlane Composed Workspace
 
-When making a change to a Patchlane fork:
+Use three separate authorization boundaries. The user's initial request is not approval to mutate the repository, and approval for one boundary never implies approval for a later one.
 
-1. Do not edit a raw patch branch unless the user explicitly requests it.
-2. From a configured branch, run `patchlane workspace create --lane <lane>`.
-3. Work only in the generated workspace.
-4. Inspect existing code across all composed lanes before changing behavior.
-5. Keep the workspace history linear; do not create merge commits.
-6. Commit complete, reviewable changes and run the repository's normal tests.
-7. Run `patchlane workspace status --json` before landing.
-8. Run `patchlane workspace land --dry-run` and review any conflict or round-trip mismatch.
-9. Use an existing configured lane that matches the requested change; do not invent a lane silently.
-10. Obtain approval before running `patchlane workspace land --push`.
+## Candidate boundary
+
+1. Inspect the repository and select an existing configured lane that matches the requested change. Do not invent a lane silently.
+2. Present a concise plan naming the lane and ask for approval to create, edit, commit, and validate a composed workspace.
+3. Before that approval, do not create a workspace, worktree, branch, or commit and do not change files, configured refs, or remotes.
+4. After approval, run `patchlane workspace create --lane <lane>` from a configured worktree.
+5. Work only in the generated workspace. Do not check out or edit the raw configured lane.
+6. Inspect existing code across all composed lanes before changing behavior.
+7. Keep history linear, commit complete reviewable changes, and run normal tests.
+8. Run `patchlane workspace status --json` and `patchlane workspace land --dry-run`.
+9. Fix dirty files, stale lanes, projection conflicts, and round-trip mismatches rather than bypassing validation.
+10. Report the candidate commits and validation result. Stop without landing unless the user separately approves local projection.
 
 A workspace includes the complete composed fork: upstream code, every configured patch lane, Patchlane workflows and skills, tests, CI configuration, and development tooling. The selected lane is the only lane that receives commits during landing. Patchlane replays the workspace commits onto that lane, recomposes every lane, and requires the resulting tree to match the tested workspace tree exactly.
 
@@ -30,30 +32,25 @@ patchlane workspace create --lane patch/product
 
 Use `--config-ref origin/main` when the current branch does not contain `.patchlane.yml`. Use `--path` or `--name` only when a stable custom worktree location or identifier is needed. Change directory to the reported path before editing.
 
-## Land
+## Local projection boundary
 
-Before landing:
-
-```bash
-patchlane workspace status --json
-patchlane workspace land --dry-run
-```
-
-Fix dirty files, merge commits, stale lane refs, projection conflicts, and round-trip mismatches rather than bypassing validation. A mismatch commonly means the selected lane is wrong, a later lane overwrites the change, or the workspace contains changes for multiple lanes. Split those changes into separate workspaces when appropriate.
-
-Land locally with:
+After the dry run, show the target lane and candidate commits and ask for explicit approval to update that local configured lane. Only after this separate approval, land locally with:
 
 ```bash
 patchlane workspace land
 ```
 
-Remote writes are never implicit. After reviewing the dry run and receiving approval, use:
+Confirm that only the selected local lane changed and that all remote refs remained unchanged.
+
+## Publish boundary
+
+Local projection approval does not authorize publication. Show the exact remote and ref update and obtain another explicit approval before using:
 
 ```bash
 patchlane workspace land --push
 ```
 
-Keep the workspace until the landed lane has been reviewed or upstreamed. Remove it only after confirming there are no unlanded changes:
+Keep the workspace until the landed lane has been reviewed or upstreamed. Removing a workspace is also a mutation: remove it only when requested or included in an approved cleanup plan and after confirming there are no unlanded changes:
 
 ```bash
 patchlane workspace remove

@@ -1,9 +1,5 @@
 export type CompositionErrorCode =
-	| 'missing_lane'
-	| 'invalid_lane'
-	| 'invalid_lane_base'
-	| 'conflict'
-	| 'workflow_policy';
+	'missing_lane' | 'invalid_lane' | 'invalid_lane_base' | 'conflict' | 'workflow_policy';
 
 export class CompositionError extends Error {
 	readonly name = 'CompositionError';

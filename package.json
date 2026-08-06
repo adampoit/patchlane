@@ -17,6 +17,8 @@
     "artifacts:sync": "node --experimental-strip-types ./scripts/sync-skill-assets.ts",
     "artifacts:check": "node --experimental-strip-types ./scripts/sync-skill-assets.ts --check",
     "build": "npm run artifacts:sync && tsc -p tsconfig.json",
+    "evals:check": "tsc -p tsconfig.evals.json",
+    "evals": "npm run build && npm run evals:check && node --experimental-strip-types ./evals/run.ts",
     "changelog": "node --experimental-strip-types ./scripts/changelog.ts --print",
     "changelog:raw": "node --experimental-strip-types ./scripts/raw-changelog.ts",
     "release": "gh workflow run draft-release.yml",
@@ -26,6 +28,7 @@
     "prepublishOnly": "npm run artifacts:check"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.83.0",
     "@types/node": "^25.6.0",
     "prettier": "^3.8.3",
     "typescript": "^7.0.0",
