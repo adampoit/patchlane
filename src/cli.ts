@@ -172,6 +172,9 @@ cli.command('workspace <action>', 'Create, inspect, land, or remove a composed P
 					lane: args.lane,
 					dryRun: args.dryRun === true,
 					push: args.push === true,
+					originRemoteName: args.originRemoteName,
+					upstreamRemoteName: args.upstreamRemoteName,
+					upstreamRemoteUrl: env('UPSTREAM_REMOTE_URL'),
 				});
 				process.stdout.write(`${args.json ? formatWorkspaceLandJson(result) : formatWorkspaceLand(result)}\n`);
 				return;
