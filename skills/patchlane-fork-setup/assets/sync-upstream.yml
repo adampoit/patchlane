@@ -46,7 +46,7 @@ jobs:
           node-version: '22'
 
       - name: Run patchlane sync
-        run: npx patchlane@0.5.3-dev.0 sync
+        run: npx patchlane@0.5.3 sync
         env:
           GH_TOKEN: ${{ steps.patchlane-token.outputs.token }}
           UPSTREAM_SOURCE: ${{ inputs.source }}
