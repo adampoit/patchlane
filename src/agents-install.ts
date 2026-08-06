@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { getPackageVersion } from './package-version.js';
 
 const DEFAULT_INSTALL_DIR = '.agents/skills';
 const INSTALL_STATE_FILE = '.patchlane-install.json';
+const BUNDLED_SKILLS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'skills');
 
 type SkillManifest = {
 	version: 1;
@@ -127,8 +129,7 @@ async function fetchText(url: string) {
 	return response.text();
 }
 
-async function fetchManifest(sourceBaseUrl: string) {
-	const raw = await fetchText(buildUrl(sourceBaseUrl, 'manifest.json'));
+function parseManifestText(raw: string) {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(raw);
@@ -136,6 +137,36 @@ async function fetchManifest(sourceBaseUrl: string) {
 		fail('Failed to parse the Patchlane skills manifest as JSON.');
 	}
 	return parseManifest(parsed);
+}
+
+async function fetchManifest(sourceBaseUrl: string) {
+	return parseManifestText(await fetchText(buildUrl(sourceBaseUrl, 'manifest.json')));
+}
+
+function readBundledManifest() {
+	let raw: string;
+	try {
+		raw = readFileSync(path.join(BUNDLED_SKILLS_DIR, 'manifest.json'), 'utf8');
+	} catch (error) {
+		fail(`Failed to read bundled Patchlane skills: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	return parseManifestText(raw);
+}
+
+function readBundledSkills(manifest: SkillManifest): FetchedSkill[] {
+	return manifest.skills.map((skill) => ({
+		name: skill.name,
+		files: skill.files.map((relativePath) => {
+			const filePath = path.join(BUNDLED_SKILLS_DIR, skill.name, relativePath);
+			try {
+				return { relativePath, contents: readFileSync(filePath, 'utf8') };
+			} catch (error) {
+				fail(
+					`Failed to read bundled skill file '${filePath}': ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+	}));
 }
 
 async function fetchSkill(sourceBaseUrl: string, skill: SkillDefinition): Promise<FetchedSkill> {
@@ -191,12 +222,24 @@ function writeSkillFiles(installDir: string, skill: FetchedSkill) {
 
 export async function installPatchlaneAgents(options: InstallPatchlaneAgentsOptions = {}) {
 	const installDir = path.resolve(process.cwd(), options.installDir ?? DEFAULT_INSTALL_DIR);
-	const ref = options.ref ?? `v${getPackageVersion()}`;
-	const sourceBaseUrl = resolveSourceBaseUrl(ref);
+	const configuredRef = options.ref ?? env('PATCHLANE_SKILLS_REF');
+	const hasExplicitRemoteSource = configuredRef !== undefined || Boolean(env('PATCHLANE_SKILLS_BASE_URL'));
+	const useBundledSkills = !hasExplicitRemoteSource && existsSync(path.join(BUNDLED_SKILLS_DIR, 'manifest.json'));
+	let sourceBaseUrl: string;
+	let fetchedSkills: FetchedSkill[];
 
-	log(`Fetching Patchlane agent skills from ${sourceBaseUrl}`);
-	const manifest = await fetchManifest(sourceBaseUrl);
-	const fetchedSkills = await Promise.all(manifest.skills.map((skill) => fetchSkill(sourceBaseUrl, skill)));
+	if (useBundledSkills) {
+		sourceBaseUrl = pathToFileURL(BUNDLED_SKILLS_DIR).toString();
+		log(`Using bundled Patchlane agent skills from ${BUNDLED_SKILLS_DIR}`);
+		const manifest = readBundledManifest();
+		fetchedSkills = readBundledSkills(manifest);
+	} else {
+		const ref = configuredRef ?? `v${getPackageVersion()}`;
+		sourceBaseUrl = resolveSourceBaseUrl(ref);
+		log(`Fetching Patchlane agent skills from ${sourceBaseUrl}`);
+		const manifest = await fetchManifest(sourceBaseUrl);
+		fetchedSkills = await Promise.all(manifest.skills.map((skill) => fetchSkill(sourceBaseUrl, skill)));
+	}
 
 	mkdirSync(installDir, { recursive: true });
 	const installStatePath = path.join(installDir, INSTALL_STATE_FILE);

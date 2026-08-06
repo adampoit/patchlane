@@ -166,13 +166,14 @@ npx patchlane workspace remove
 
 `workspace create` pins the source and every configured lane in local metadata under the Git common directory. Landing requires clean, linear history, checks that all pinned lane refs are fresh, replays commits onto exactly one lane, recomposes every lane, and requires an exact tree match. Use `--config-ref <ref>` when the current branch does not contain `.patchlane.yml`, and `workspace remove --force` only when intentionally discarding unlanded work.
 
-### Install agent skills
+### Version and agent skills
 
 ```bash
+npx patchlane --version
 npx patchlane agents
 ```
 
-The installer fetches skills matching the installed Patchlane version. Use `--ref=<git-ref>` only when intentionally testing skills from another Patchlane revision.
+`agents` installs the skills bundled with the installed Patchlane package, so local package development does not require a matching GitHub tag or network access. Use `--ref=<git-ref>` only when intentionally testing skills from another Patchlane revision; `PATCHLANE_SKILLS_BASE_URL` remains available for a custom skill source.
 
 ## Sync environment overrides
 
