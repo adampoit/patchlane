@@ -400,7 +400,6 @@ export function landWorkspace(options: WorkspaceLandOptions = {}): WorkspaceLand
 			);
 		}
 		const localExpected = localLaneLease(cwd, targetLane, targetExpected);
-		git(['update-ref', `refs/heads/${targetLane}`, candidateLaneSha, localExpected], cwd);
 
 		if (options.push) {
 			const remoteExpected = laneRemoteTip(cwd, state.originRemoteName, targetLane);
@@ -436,6 +435,8 @@ export function landWorkspace(options: WorkspaceLandOptions = {}): WorkspaceLand
 			}
 			pushed = true;
 		}
+
+		git(['update-ref', `refs/heads/${targetLane}`, candidateLaneSha, localExpected], cwd);
 
 		state.landedLaneSha = candidateLaneSha;
 		state.landedAt = new Date().toISOString();
