@@ -31,4 +31,6 @@ A failed user-driver run can be replayed without another user-model request:
 npm run evals -- --scenario sync-repair --replay /path/to/user-driver-transcript.json
 ```
 
-The harness passes the three Patchlane skills explicitly to the worker and disables unrelated project context, extensions, and skill discovery so failures are attributable to the Patchlane instructions. The user driver receives only its immutable versioned policy, structured scenario intent, and sanitized worker responses.
+The harness passes the three Patchlane skills explicitly to the worker and disables unrelated project context, extensions, and skill discovery so failures are attributable to the Patchlane instructions. The user driver receives only the protected policy and templates in `evals/user-driver/`, the validated contract in `evals/intents/`, and sanitized worker responses. Transcripts record hashes for both contract bundles.
+
+Run `npm run evals:contracts` to verify the reviewed hash manifest. Contract changes require explicit review and a fresh baseline generated with `npm run evals:contracts:update`; the update command prints every added, changed, or removed contract.

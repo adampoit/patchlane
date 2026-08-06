@@ -169,6 +169,7 @@ function scenario(overrides: Partial<UserScenario> = {}): UserScenario {
 		preferences: [],
 		authorization: [],
 		prohibitions: [],
+		maxTurns: 3,
 		...overrides,
 	};
 }
@@ -348,6 +349,10 @@ describe('runAgent orchestration', () => {
 		});
 		expect(result.userDriver.stopReason).toBe('driver_end');
 		expect(result.transcript.stopReason).toBe('driver_end');
+		expect(result.transcript.contractHashes).toEqual({
+			intent: expect.stringMatching(/^[a-f0-9]{64}$/),
+			driverBundle: expect.stringMatching(/^[a-f0-9]{64}$/),
+		});
 		expect(result.transcript.turns).toHaveLength(2);
 		expect(result.transcript.turns[0]).toMatchObject({
 			decision: { type: 'reply', content: 'Please make the requested change.' },

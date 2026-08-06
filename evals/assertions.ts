@@ -188,7 +188,7 @@ export function snapshotChecks(context: EvalContext, run: PiRun): Check[] {
 export function workspaceChangeChecks(context: EvalContext, run: PiRun): Check[] {
 	const commands = bashCommands(run);
 	const state = stateFiles(context)[0];
-	const approval = firstApprovalTurn(run, 'workspace.create-and-commit');
+	const approval = firstApprovalTurn(run, 'change.make-local-commit');
 	const final = run.transcript.finalSnapshot;
 	const checks: Check[] = [
 		check(approval !== undefined, 'obtained explicit approval before the workspace change'),

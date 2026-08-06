@@ -1,0 +1,8 @@
+{
+  "name": "health-check",
+  "goal": "Find out whether this Patchlane setup is healthy.",
+  "preferences": ["Use read-only checks.", "Explain any warning or failure clearly."],
+  "authorization": [],
+  "prohibitions": ["Do not change files, branches, worktrees, or remotes."],
+  "maxTurns": 4
+}

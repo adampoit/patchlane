@@ -27,6 +27,9 @@ jobs:
       - name: Check generated artifacts
         run: npm run artifacts:check
 
+      - name: Check eval contracts
+        run: npm run evals:contracts
+
       - name: Run tests
         run: npm test
 
