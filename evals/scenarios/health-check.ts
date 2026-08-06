@@ -7,20 +7,15 @@ import {
 	preApprovalMutationCheck,
 } from '../assertions.ts';
 import { createFixture, git, optionalRef, targetTip } from '../fixtures.ts';
+import { loadScenarioIntent } from '../intent.ts';
 import type { Scenario } from '../types.ts';
 
 export function healthCheckScenario(): Scenario {
+	const intent = loadScenarioIntent('health-check');
 	return {
-		name: 'health-check',
+		name: intent.name,
 		description: 'Check Patchlane configuration and sync health without changing repository state.',
-		intent: {
-			name: 'health-check',
-			goal: 'Find out whether this Patchlane setup is healthy.',
-			preferences: ['Use read-only checks.', 'Explain any warning or failure clearly.'],
-			authorization: [],
-			prohibitions: ['Do not change files, branches, worktrees, or remotes.'],
-			maxTurns: 4,
-		},
+		intent,
 		setup: createFixture,
 		assert: (context, run) => {
 			const commands = bashCommands(run);

@@ -65,6 +65,10 @@ export type UserDriverTranscript = {
 	version: 2;
 	scenario: UserScenario;
 	systemPromptVersion: string;
+	contractHashes?: {
+		intent: string;
+		driverBundle: string;
+	};
 	worker: {
 		requestedModel: string;
 		observedModel?: string;

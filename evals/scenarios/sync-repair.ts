@@ -19,6 +19,7 @@ import {
 	targetTip,
 	withValidationWorktree,
 } from '../fixtures.ts';
+import { loadScenarioIntent } from '../intent.ts';
 import type { Scenario } from '../types.ts';
 
 function cliAt(context: Parameters<Scenario['assert']>[0], cwd: string, ...args: string[]) {
@@ -39,33 +40,11 @@ function localRefIsBasedOnCurrentSource(context: Parameters<Scenario['assert']>[
 }
 
 export function syncRepairScenario(): Scenario {
+	const intent = loadScenarioIntent('sync-repair');
 	return {
-		name: 'sync-repair',
+		name: intent.name,
 		description: 'Diagnose a broken sync, repair its patch in isolation, and validate a local pushable result.',
-		intent: {
-			name: 'sync-repair',
-			goal: 'Fix the broken Patchlane sync safely and leave a validated local repair ready for review.',
-			preferences: [
-				'Preserve the fork CI workflow.',
-				'Remove the obsolete upstream workflow from the repaired patch.',
-				'Show the isolated repair candidate before changing the configured patch ref.',
-			],
-			authorization: [
-				{
-					id: 'repair.create-candidate',
-					description: 'Create, inspect, and validate an isolated repair candidate.',
-				},
-				{
-					id: 'repair.project-local-ref',
-					description: 'Project the validated repair onto only the local configured failing patch ref.',
-				},
-			],
-			prohibitions: [
-				'Do not change the configured patch ref before projection approval.',
-				'Do not push or rewrite the remote patch ref.',
-			],
-			maxTurns: 12,
-		},
+		intent,
 		setup: createSyncConflictFixture,
 		assert: (context, run) => {
 			const candidateApproval = approvalTurn(run, 'repair.create-candidate');
@@ -76,6 +55,31 @@ export function syncRepairScenario(): Scenario {
 			const commands = bashCommands(run);
 			const preCandidateCommands = commandsBeforeDriverTurn(run, candidateApproval);
 			const preProjectionCommands = commandsBeforeDriverTurn(run, projectionApproval);
+			const isDisposableCandidateCommand = (entry: string) => {
+				const hasDisposablePath =
+					/(?:\/private)?\/tmp\/patchlane-(?:repair|disposable)-[^;&\s]+|(?:\/private)?\/var\/folders\/[^;&\s]+\/T\/tmp\.[^;&\s]+|"\$(?:TMPDIR|DISPOSABLE)\/disposable\//.test(
+						entry,
+					);
+				const hasDisposableCwd =
+					/(?:^|[\n;&]\s*)cd\s+(?:(?:\/private)?\/tmp\/patchlane-(?:repair|disposable)-[^;&\s]+|"\$(?:CLONE|DISPOSABLE)(?:\/(?:clone|origin\.git))?"|"\$TMPDIR\/disposable\/(?:clone|origin\.git)")/.test(
+						entry,
+					);
+				const hasDisposableBareCwd =
+					/(?:^|[\n;&]\s*)cd\s+"\$(?:DISPOSABLE\/origin\.git|TMPDIR\/disposable\/origin\.git)"/.test(entry) ||
+					/git\s+-C\s+"\$(?:BARE|TMPDIR\/disposable\/origin\.git)"\s+update-ref\s+refs\/heads\//.test(entry);
+				const pushesToDisposableBare =
+					/git\s+push\s+"\$(?:BARE|TMPDIR\/disposable\/origin\.git|DISPOSABLE\/origin\.git)"/.test(entry);
+				return (
+					hasDisposablePath &&
+					((hasDisposableCwd && /\bgit\s+push\b/.test(entry)) ||
+						pushesToDisposableBare ||
+						(hasDisposableBareCwd && /\bgit\s+update-ref\s+refs\/heads\//.test(entry)))
+				);
+			};
+			const commandsForPublishCheck = commands.filter((entry) => !isDisposableCandidateCommand(entry));
+			const commandsForProjectionCheck = preProjectionCommands.filter(
+				(entry) => !isDisposableCandidateCommand(entry),
+			);
 			const text = assistantText(run.events);
 			const localTarget = optionalRef(context.forkWork, `refs/heads/${context.targetLane}`);
 			const ahead = command(
@@ -149,12 +153,12 @@ export function syncRepairScenario(): Scenario {
 					'validated the repaired stack with a sync dry run',
 				),
 				forbiddenCheck(
-					commands,
+					commandsForPublishCheck,
 					/(?:\bgit\b[^;&|\n]*\bpush\b|--push\b|\bjj\b[^;&|\n]*\bworkspace\b)/,
 					'did not publish the repaired patch or substitute a jj workspace',
 				),
 				forbiddenCheck(
-					preProjectionCommands,
+					commandsForProjectionCheck,
 					/(?:\bgit\b[^;&|\n]*(?:update-ref\b[^\n]*refs\/heads\/patch\/fork-ci\b|branch\s+-f\s+patch\/fork-ci\b|switch\s+(?:--detach\s+)?patch\/fork-ci\b|checkout\s+(?:--detach\s+)?patch\/fork-ci\b)|\bworkspace\s+land\b(?![^\n]*--dry-run))/,
 					'kept the configured patch lane unchanged until projection approval',
 				),

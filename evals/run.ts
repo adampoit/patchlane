@@ -3,11 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { writeText } from './fixtures.ts';
 import { defaultModel, defaultUserModel, skillPaths, cliPath } from './config.ts';
 import { parseUserDriverTranscript, runAgent, serializeRun, serializeTranscript } from './runner.ts';
-import { featureAddScenario } from './scenarios/feature-add.ts';
-import { featureChangeScenario } from './scenarios/feature-change.ts';
-import { healthCheckScenario } from './scenarios/health-check.ts';
-import { setupScenario } from './scenarios/setup.ts';
-import { syncRepairScenario } from './scenarios/sync-repair.ts';
+import { registeredScenarios } from './scenarios/index.ts';
 import type { Check, Scenario, UserDriverTranscript } from './types.ts';
 
 function parseNumber(value: string | undefined, name: string, minimum: number) {
@@ -66,7 +62,7 @@ function parseArguments() {
 		else if (arg === '--keep') keep = true;
 		else if (arg === '--help' || arg === '-h') {
 			console.log(
-				`Usage: npm run evals -- [options]\n\nOptions:\n  --scenario <name|all>       Scenario to run (default: all)\n  --model <provider/id>       Worker Pi model (default: ${defaultModel})\n  --user-model <provider/id>  User-driver model (default: ${defaultUserModel})\n  --timeout <ms>              Worker turn timeout (default: ${timeoutMs})\n  --total-timeout <ms>        Total scenario timeout (default: --timeout)\n  --user-timeout <ms>         User-driver turn timeout (default: --timeout)\n  --max-turns <n>             Maximum user-driver turns (default: scenario value)\n  --max-user-message-chars <n>  Maximum generated user-message length\n  --max-user-tokens <n>       User-driver token budget\n  --max-user-cost <n>         User-driver cost budget\n  --api-key <key>             Worker runtime provider API key\n  --api-key-env <name>        Worker API key environment variable (default: ${apiKeyEnv})\n  --auth-path <path>          Worker credentials file; never read by default\n  --user-api-key <key>        User-driver runtime provider API key\n  --user-api-key-env <name>   User-driver API key environment variable (defaults to worker env)\n  --user-auth-path <path>     User-driver credentials file\n  --replay <path>             Replay a stored user-driver transcript without a user-model request\n  --fail-fast                 Stop after the first failed scenario\n  --keep                      Keep temporary fixtures for inspection`,
+				`Usage: npm run evals -- [options]\n\nOptions:\n  --scenario <name|all>       Scenario to run (default: all)\n  --model <provider/id>       Worker Pi model (default: ${defaultModel})\n  --user-model <provider/id>  User-driver model (default: ${defaultUserModel})\n  --timeout <ms>              Worker turn timeout (default: ${timeoutMs})\n  --total-timeout <ms>        Total scenario timeout (default: 2 x --timeout)\n  --user-timeout <ms>         User-driver turn timeout (default: --timeout)\n  --max-turns <n>             Maximum user-driver turns (default: scenario value)\n  --max-user-message-chars <n>  Maximum generated user-message length\n  --max-user-tokens <n>       User-driver token budget\n  --max-user-cost <n>         User-driver cost budget\n  --api-key <key>             Worker runtime provider API key\n  --api-key-env <name>        Worker API key environment variable (default: ${apiKeyEnv})\n  --auth-path <path>          Worker credentials file; never read by default\n  --user-api-key <key>        User-driver runtime provider API key\n  --user-api-key-env <name>   User-driver API key environment variable (defaults to worker env)\n  --user-auth-path <path>     User-driver credentials file\n  --replay <path>             Replay a stored user-driver transcript without a user-model request\n  --fail-fast                 Stop after the first failed scenario\n  --keep                      Keep temporary fixtures for inspection`,
 			);
 			process.exit(0);
 		}
@@ -76,7 +72,7 @@ function parseArguments() {
 		model,
 		userModel,
 		timeoutMs,
-		totalTimeoutMs,
+		totalTimeoutMs: totalTimeoutMs ?? timeoutMs * 2,
 		userTimeoutMs,
 		maxTurns,
 		maxUserMessageChars,
@@ -120,13 +116,7 @@ async function main() {
 	const options = parseArguments();
 	const replay = options.replayPath ? readTranscript(options.replayPath) : undefined;
 	if (replay && options.scenarioName === 'all') options.scenarioName = replay.scenario.name;
-	const scenarios: Scenario[] = [
-		setupScenario(),
-		featureAddScenario(),
-		featureChangeScenario(),
-		syncRepairScenario(),
-		healthCheckScenario(),
-	];
+	const scenarios: Scenario[] = registeredScenarios();
 	const selected =
 		options.scenarioName === 'all'
 			? scenarios

@@ -24,13 +24,13 @@ function fixture() {
 }
 
 const authorizations: UserAuthorization[] = [
-	{ id: 'workspace.create-and-commit', description: 'Create a workspace and commit there.' },
+	{ id: 'change.make-local-commit', description: 'Make and commit a reviewable local change.' },
 ];
 
 describe('eval authorization boundaries', () => {
 	test('accepts only declared authorization IDs', () => {
-		expect(parseAuthorizationId({ authorizationId: 'workspace.create-and-commit' }, authorizations)).toBe(
-			'workspace.create-and-commit',
+		expect(parseAuthorizationId({ authorizationId: 'change.make-local-commit' }, authorizations)).toBe(
+			'change.make-local-commit',
 		);
 		expect(() => parseAuthorizationId({ authorizationId: 'workspace.push' }, authorizations)).toThrow(
 			/not authorized/,
@@ -46,10 +46,11 @@ describe('eval authorization boundaries', () => {
 		);
 	});
 
-	test('rejects command-like and multi-sentence driver messages', () => {
+	test('rejects command-like and overly long driver messages', () => {
 		expect(validateUserMessage('Please proceed with the approved plan.', 400)).toBeUndefined();
+		expect(validateUserMessage('Please proceed. Let me know when it is ready.', 400)).toBeUndefined();
+		expect(validateUserMessage('Proceed. Then report back. Include any blockers.', 400)).toBeUndefined();
 		expect(validateUserMessage('Run git push now.', 400)).toMatch(/implementation command/);
-		expect(validateUserMessage('Proceed. Then report back.', 400)).toMatch(/more than one sentence/);
 	});
 
 	test('checks each shell segment for forbidden actions', () => {

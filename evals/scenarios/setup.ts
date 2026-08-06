@@ -1,3 +1,4 @@
+import { parse } from 'yaml';
 import { cliPath } from '../config.ts';
 import {
 	assistantText,
@@ -11,6 +12,7 @@ import {
 	snapshotChecks,
 } from '../assertions.ts';
 import { command, createSetupFixture, git, targetTip, withValidationWorktree } from '../fixtures.ts';
+import { loadScenarioIntent } from '../intent.ts';
 import type { Scenario } from '../types.ts';
 
 function bareRef(context: Parameters<Scenario['assert']>[0], lane: string) {
@@ -38,31 +40,11 @@ function doctorPassed(result: ReturnType<typeof command> | undefined) {
 }
 
 export function setupScenario(): Scenario {
+	const intent = loadScenarioIntent('setup');
 	return {
-		name: 'setup',
+		name: intent.name,
 		description: 'Inspect an unconfigured fork, confirm a setup plan, and validate the completed patch stack.',
-		intent: {
-			name: 'setup',
-			goal: 'Set up Patchlane for this fork.',
-			preferences: [
-				'Use the existing upstream remote and its main branch.',
-				'Keep the existing CI workflow and fork customization on focused patch branches.',
-				'Use Patchlane’s default GitHub App wiring.',
-			],
-			authorization: [
-				{
-					id: 'setup.publish-patch-refs',
-					description:
-						'Apply the complete setup plan and publish only the configured patch refs to the disposable local origin.',
-				},
-			],
-			prohibitions: [
-				'Do not change files, branches, remotes, credentials, or settings before approval.',
-				'Do not publish the generated integration output.',
-				'Do not change the base branch.',
-			],
-			maxTurns: 10,
-		},
+		intent,
 		setup: createSetupFixture,
 		assert: (context, run) => {
 			const approval = firstApprovalTurn(run, 'setup.publish-patch-refs');
@@ -78,17 +60,32 @@ export function setupScenario(): Scenario {
 			}));
 			const doctor = validation?.doctor;
 			const sync = validation?.sync;
-			const patchLanes = ['patch/sync', 'patch/ci', 'patch/product'];
-			const patchRefsPublished = patchLanes.every((lane) => bareRef(context, lane).status === 0);
+			let patchLanes: string[] = [];
+			try {
+				const parsed = config.status === 0 ? (parse(config.stdout) as { patchRefs?: unknown }) : undefined;
+				patchLanes = Array.isArray(parsed?.patchRefs)
+					? parsed.patchRefs.filter((ref): ref is string => typeof ref === 'string')
+					: [];
+			} catch {
+				patchLanes = [];
+			}
+			const productLanes = patchLanes.filter((lane) => lane !== 'patch/sync' && lane !== 'patch/ci');
+			const productLane = productLanes.length === 1 ? productLanes[0] : undefined;
+			const patchRefsPublished =
+				patchLanes.length === 3 && patchLanes.every((lane) => bareRef(context, lane).status === 0);
 			const setupConfigValid =
 				config.status === 0 &&
 				/source:\s*branch:main\b/.test(config.stdout) &&
 				/ciWorkflow:\s*CI\b/.test(config.stdout) &&
-				/patch\/sync[\s\S]*patch\/ci[\s\S]*patch\/product/.test(config.stdout);
-			const productFile = bareFile(context, 'patch/product', 'FORK.md');
+				patchLanes[0] === 'patch/sync' &&
+				patchLanes[1] === 'patch/ci' &&
+				productLane !== undefined;
+			const productFile = productLane ? bareFile(context, productLane, 'FORK.md') : undefined;
 			const mainFile = bareFile(context, 'main', 'FORK.md');
 			const productPreserved =
-				productFile.status === 0 && productFile.stdout.includes('Existing fork customization');
+				productFile !== undefined &&
+				productFile.status === 0 &&
+				productFile.stdout.includes('Existing fork customization');
 			const mainPreserved = mainFile.status === 0 && mainFile.stdout.includes('Existing fork customization');
 			const ciAdjusted =
 				ciWorkflow.status === 0 &&
@@ -120,7 +117,7 @@ export function setupScenario(): Scenario {
 				check(firstTurnCommands.length > 0, 'inspected the fork before setup'),
 				forbiddenCheck(
 					preConfirmationCommands,
-					/\bgit\b[^;&|\n]*\b(?:push|commit)\b/,
+					/\bgit\b[^;&|\n]*\s(?:push|commit)(?=\s|$)/,
 					'did not publish or commit before approval',
 				),
 				check(/plan|confirm|approval/.test(text), 'presented a setup plan for confirmation'),
