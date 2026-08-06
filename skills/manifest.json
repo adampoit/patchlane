@@ -8,6 +8,10 @@
     {
       "name": "patchlane-sync-patches",
       "files": ["SKILL.md"]
+    },
+    {
+      "name": "patchlane-workspace",
+      "files": ["SKILL.md"]
     }
   ]
 }

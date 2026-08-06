@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { parse, stringify } from 'yaml';
 import { parseUpstreamSource } from './upstream-source.js';
 
@@ -112,8 +113,24 @@ export function parsePatchlaneConfig(value: unknown): PatchlaneConfig {
 		if (typeof patchRef !== 'string' || !patchRef.trim()) {
 			throw new Error("Patchlane config field 'patchRefs' must contain only non-empty strings.");
 		}
-		return patchRef.trim();
+		const ref = patchRef.trim();
+		if (
+			ref.startsWith('-') ||
+			ref.startsWith('refs/') ||
+			ref.startsWith('/') ||
+			ref.endsWith('/') ||
+			ref.includes('\\') ||
+			ref.includes('..') ||
+			ref.includes('@{') ||
+			ref.split('/').some((part) => !part || part === '.' || part === '..')
+		) {
+			throw new Error(`Patchlane config field 'patchRefs' contains invalid ref '${ref}'.`);
+		}
+		return ref;
 	});
+	if (new Set(patchRefs).size !== patchRefs.length) {
+		throw new Error("Patchlane config field 'patchRefs' must not contain duplicates.");
+	}
 
 	const ciWorkflow = value.ciWorkflow;
 	if (ciWorkflow !== undefined && (typeof ciWorkflow !== 'string' || !ciWorkflow.trim())) {
@@ -178,17 +195,39 @@ export function serializePatchlaneConfig(config: PatchlaneConfig) {
 	});
 }
 
+export function parsePatchlaneConfigText(contents: string, source = PATCHLANE_CONFIG_FILE): PatchlaneConfig {
+	let parsed: unknown;
+	try {
+		parsed = parse(contents) as unknown;
+	} catch (error) {
+		throw new Error(`Failed to parse ${source}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	try {
+		return parsePatchlaneConfig(parsed);
+	} catch (error) {
+		throw new Error(`Invalid ${source}: ${error instanceof Error ? error.message : String(error)}`);
+	}
+}
+
 export function loadPatchlaneConfig(cwd = process.cwd(), configPath?: string): PatchlaneConfig | undefined {
 	const resolvedPath = path.resolve(cwd, configPath ?? process.env.PATCHLANE_CONFIG ?? PATCHLANE_CONFIG_FILE);
 	if (!existsSync(resolvedPath)) return undefined;
+	return parsePatchlaneConfigText(
+		readFileSync(resolvedPath, 'utf8'),
+		path.relative(cwd, resolvedPath) || resolvedPath,
+	);
+}
 
-	let parsed: unknown;
-	try {
-		parsed = parse(readFileSync(resolvedPath, 'utf8')) as unknown;
-	} catch (error) {
+export function loadPatchlaneConfigAtRef(cwd = process.cwd(), ref: string): PatchlaneConfig {
+	const result = spawnSync('git', ['show', `${ref}:${PATCHLANE_CONFIG_FILE}`], {
+		cwd,
+		encoding: 'utf8',
+	});
+	if (result.error || result.status !== 0) {
+		const detail = [result.stderr?.trim(), result.stdout?.trim()].filter(Boolean).join('\n');
 		throw new Error(
-			`Failed to parse ${path.relative(cwd, resolvedPath) || resolvedPath}: ${error instanceof Error ? error.message : String(error)}`,
+			`Could not load ${PATCHLANE_CONFIG_FILE} at ref '${ref}': ${detail || result.error?.message || 'git show failed'}`,
 		);
 	}
-	return parsePatchlaneConfig(parsed);
+	return parsePatchlaneConfigText(result.stdout, `${ref}:${PATCHLANE_CONFIG_FILE}`);
 }

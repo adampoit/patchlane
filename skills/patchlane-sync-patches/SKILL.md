@@ -5,7 +5,7 @@ description: Update patch branches in a Patchlane-managed fork so `npx patchlane
 
 # Patchlane Patch Refresh
 
-Start by reproducing the problem instead of guessing. Read `.patchlane.yml`, resolve its explicit upstream `source` and ordered `patchRefs`, and run or review `npx patchlane sync --dry-run` so the first failing patch branch is explicit without resetting the local sync branch.
+Start by reproducing the problem instead of guessing. Read `.patchlane.yml`, resolve its explicit upstream `source` and ordered `patchRefs`, and run or review `npx patchlane sync --dry-run` so the first failing patch branch is explicit without resetting the local sync branch. When repairing code or behavior, prefer `npx patchlane workspace create --lane <lane>` so the complete composed fork remains visible; edit a raw lane only when the user explicitly requests it.
 
 Use this workflow:
 
@@ -30,6 +30,8 @@ Watch for common failure modes:
 - workflow files living on the promoted base branch instead of a patch branch
 - patches created from the wrong upstream tag or branch
 - later patch branches silently depending on files introduced by an earlier patch
+
+For repairs made in a composed workspace, run `npx patchlane workspace status --json` and `npx patchlane workspace land --dry-run` before projecting the commits. A round-trip mismatch or a stale lane means the workspace must be reviewed or recreated; do not bypass the check.
 
 Finish by summarizing:
 
