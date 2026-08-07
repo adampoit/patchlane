@@ -2,23 +2,6 @@
 
 Follow the section for the version you are adopting. Migration notes are listed newest first.
 
-## 0.5.3
-
-Patchlane 0.5.3 keeps the version-1 configuration schema, ordered `patchRefs`, generated workflows, and existing sync and promotion behavior compatible. It adds composed workspaces for agent development.
-
-Run the new workflow from a configured branch:
-
-```bash
-npx patchlane@0.5.3-dev.0 agents
-npx patchlane@0.5.3-dev.0 doctor
-npx patchlane@0.5.3-dev.0 sync --dry-run
-npx patchlane@0.5.3-dev.0 workspace create --lane patch/product
-```
-
-Agents should edit and test in the generated worktree, keep commits linear, and run `workspace land --dry-run` before landing. Existing forks may continue editing raw patch branches. No remote lane is changed unless `workspace land --push` is explicitly used. Workspace metadata is local Git-common-directory state and is not committed.
-
-Preserve branch names, patch order, workflow schedules, authentication, and repository-specific workflow changes while upgrading generated workflow package references to the released Patchlane version. Use the normal tested sync and promotion flow to roll any configuration or workflow changes forward.
-
 ## 0.5
 
 Patchlane 0.5 requires every version-1 `.patchlane.yml` file to define `allowedWorkflows` and updates generated workflows to authenticate with a GitHub App. Patchlane implicitly includes its generated `sync-upstream.yml` and `promote-tested-sync.yml` workflows, so list only repository-specific workflows.
