@@ -155,6 +155,7 @@ The repository defaults to `GITHUB_REPOSITORY` in Actions or the GitHub `origin`
 Use a composed workspace for agent development instead of editing a raw patch branch:
 
 ```bash
+npx patchlane workspace list --json
 npx patchlane workspace create --lane patch/product
 cd ../project-patch-product
 npx patchlane workspace status --json
