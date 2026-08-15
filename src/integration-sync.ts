@@ -13,7 +13,7 @@ type RunOptions = {
 	env?: NodeJS.ProcessEnv;
 };
 
-const cwd = process.cwd();
+const defaultCwd = process.cwd();
 
 function fail(message: string): never {
 	process.stderr.write(`${message}\n`);
@@ -51,7 +51,7 @@ function parsePatchRefs(value: string) {
 
 function run(command: string, args: string[], options: RunOptions = {}) {
 	const result = spawnSync(command, args, {
-		cwd: options.cwd ?? cwd,
+		cwd: options.cwd ?? defaultCwd,
 		env: options.env ?? process.env,
 		encoding: options.encoding ?? 'utf8',
 	});
@@ -149,17 +149,18 @@ function resolveRelease(upstreamOwner: string, upstreamRepo: string, releaseSele
 	return match;
 }
 
-function resolvePatchRef(ref: string, originRemoteName: string) {
+function resolvePatchRef(ref: string, originRemoteName: string, cwd = defaultCwd) {
 	if (
 		git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], {
 			allowFailure: true,
+			cwd,
 		}).status === 0
 	)
 		return ref;
 
 	const fetched = git(
 		['fetch', '--no-tags', originRemoteName, `+refs/heads/${ref}:refs/remotes/${originRemoteName}/${ref}`],
-		{ allowFailure: true },
+		{ allowFailure: true, cwd },
 	);
 	if (fetched.status === 0) return `refs/remotes/${originRemoteName}/${ref}`;
 	return '';
@@ -188,18 +189,20 @@ function tmpFile(name: string) {
 	return path.join(mkdtempSync(path.join(tmpdir(), `${name}-`)), 'payload');
 }
 
-function configureGitIdentity() {
+function configureGitIdentity(cwd = defaultCwd) {
 	const name = git(['config', 'user.name'], {
 		allowFailure: true,
+		cwd,
 	}).stdout.trim();
 	const email = git(['config', 'user.email'], {
 		allowFailure: true,
+		cwd,
 	}).stdout.trim();
 	if (!name) {
-		git(['config', 'user.name', 'github-actions[bot]']);
+		git(['config', 'user.name', 'github-actions[bot]'], { cwd });
 	}
 	if (!email) {
-		git(['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com']);
+		git(['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], { cwd });
 	}
 }
 
@@ -222,25 +225,80 @@ export type IntegrationSyncOptions = {
 	upstreamRemoteUrl?: string;
 };
 
-function hasGeneratedAncestry(resolved: string, diffBase: string) {
+type InternalIntegrationSyncOptions = IntegrationSyncOptions & {
+	cwd?: string;
+	skipDryRunIsolation?: boolean;
+};
+
+function copyLocalBranches(sourceCwd: string, targetCwd: string) {
+	const refs = git(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads'], {
+		allowFailure: true,
+		cwd: sourceCwd,
+	});
+	if (refs.status !== 0) return;
+
+	for (const line of refs.stdout.split(/\r?\n/).filter(Boolean)) {
+		const separator = line.indexOf(' ');
+		if (separator < 0) continue;
+		const ref = line.slice(0, separator);
+		const sha = line.slice(separator + 1).trim();
+		if (ref && sha) git(['update-ref', ref, sha], { cwd: targetCwd });
+	}
+}
+
+function runDryRunInClone(options: InternalIntegrationSyncOptions, sourceCwd: string) {
+	const originRemoteName = options.originRemoteName ?? 'origin';
+	const sourceRepo = git(['rev-parse', '--show-toplevel'], { cwd: sourceCwd }).stdout.trim();
+	const sourceOrigin = git(['remote', 'get-url', originRemoteName], {
+		allowFailure: true,
+		cwd: sourceCwd,
+	}).stdout.trim();
+	const cloneDir = mkdtempSync(path.join(tmpdir(), 'patchlane-dry-run-repo-'));
+
+	try {
+		git(['clone', '--no-local', '--origin', originRemoteName, sourceRepo, cloneDir], { cwd: sourceCwd });
+		if (sourceOrigin) {
+			git(['remote', 'set-url', originRemoteName, sourceOrigin], { cwd: cloneDir });
+		}
+		copyLocalBranches(sourceCwd, cloneDir);
+		runIntegrationSyncInternal({ ...options, cwd: cloneDir, skipDryRunIsolation: true });
+	} finally {
+		rmSync(cloneDir, { force: true, recursive: true });
+	}
+}
+
+function hasGeneratedAncestry(resolved: string, diffBase: string, cwd = defaultCwd) {
 	const logResult = git(['log', '--format=%B', `${diffBase}..${resolved}`], {
 		allowFailure: true,
+		cwd,
 	});
 	if (logResult.status !== 0) return false;
 	const text = logResult.stdout;
 	return text.includes('\nPatch-Ref:') || text.includes('\nOriginal-Commit:') || text.includes('apply patch/');
 }
 
-function isBasedOnSyncBranch(resolved: string, remoteSyncRef: string) {
+function isBasedOnSyncBranch(resolved: string, remoteSyncRef: string, cwd = defaultCwd) {
 	if (!remoteSyncRef) return false;
 	const result = git(['merge-base', '--is-ancestor', remoteSyncRef, resolved], {
 		allowFailure: true,
+		cwd,
 	});
 	return result.status === 0;
 }
 
 export function runIntegrationSync(options: IntegrationSyncOptions) {
-	configureGitIdentity();
+	return runIntegrationSyncInternal(options);
+}
+
+function runIntegrationSyncInternal(options: InternalIntegrationSyncOptions) {
+	const repoCwd = path.resolve(options.cwd ?? defaultCwd);
+	if (options.dryRun && !options.skipDryRunIsolation) {
+		return runDryRunInClone(options, repoCwd);
+	}
+
+	const git = (args: string[], runOptions: RunOptions = {}) =>
+		runText('git', args, { ...runOptions, cwd: runOptions.cwd ?? repoCwd });
+	configureGitIdentity(repoCwd);
 
 	const upstreamOwner = options.upstreamOwner;
 	const upstreamRepo = options.upstreamRepo;
@@ -401,10 +459,10 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 			.filter(Boolean);
 
 		const warnings: string[] = [];
-		if (hasGeneratedAncestry(resolved, diffBase)) {
+		if (hasGeneratedAncestry(resolved, diffBase, repoCwd)) {
 			warnings.push('Contains generated patchlane commits in ancestry');
 		}
-		if (isBasedOnSyncBranch(resolved, remoteSyncRef)) {
+		if (isBasedOnSyncBranch(resolved, remoteSyncRef, repoCwd)) {
 			warnings.push('Appears to be based on sync branch output');
 		}
 
@@ -439,8 +497,8 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		}
 
 		if (!allowDependentPatches) {
-			const generated = hasGeneratedAncestry(resolved, diffBase);
-			const basedOnSync = isBasedOnSyncBranch(resolved, remoteSyncRef);
+			const generated = hasGeneratedAncestry(resolved, diffBase, repoCwd);
+			const basedOnSync = isBasedOnSyncBranch(resolved, remoteSyncRef, repoCwd);
 			if (generated || basedOnSync) {
 				const reason = generated
 					? `Patch ref '${ref}' contains generated patchlane commits in its ancestry.`
@@ -502,7 +560,7 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 		const patchDiagnostics: PatchDiagnostic[] = [];
 
 		for (const ref of patchRefs) {
-			const resolved = resolvePatchRef(ref, originRemoteName);
+			const resolved = resolvePatchRef(ref, originRemoteName, repoCwd);
 			if (!resolved) {
 				const body = [
 					`- Base: \`${upstreamBase}\``,
@@ -664,8 +722,8 @@ export function runIntegrationSync(options: IntegrationSyncOptions) {
 
 	log(`Building ${syncBranch} from ${sourceLabel}`);
 	git(['checkout', '-B', syncBranch, upstreamBase]);
-	const { appliedRefs, patchDiagnostics, rebuiltSyncSha } = applyAllPatches(process.cwd(), false);
-	enforceWorkflowPolicy(process.cwd(), rebuiltSyncSha);
+	const { appliedRefs, patchDiagnostics, rebuiltSyncSha } = applyAllPatches(repoCwd, false);
+	enforceWorkflowPolicy(repoCwd, rebuiltSyncSha);
 
 	writeOutput('failed_bookmark', '');
 	writeOutput('failed_commit', '');

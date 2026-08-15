@@ -49,9 +49,12 @@ The promoted base and sync branches are generated output. Fork-owned changes bel
 ## Development
 
 ```bash
-npm install
+nix develop
+npm ci
 npm test
 ```
+
+The development shell provides Node.js, GitHub CLI, Git, and Jujutsu.
 
 Model-backed skill evals are opt-in; see [evals/README.md](evals/README.md).
 

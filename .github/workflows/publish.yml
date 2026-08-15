@@ -15,23 +15,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Setup Node
+      - name: Setup npm publishing
         uses: actions/setup-node@v7
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org/'
 
+      - name: Setup Nix
+        uses: DeterminateSystems/nix-installer-action@v22
+
       - name: Install dependencies
-        run: npm ci
+        run: nix develop --command npm ci
 
       - name: Check generated artifacts
-        run: npm run artifacts:check
+        run: nix develop --command npm run artifacts:check
 
       - name: Check eval contracts
-        run: npm run evals:contracts
+        run: nix develop --command npm run evals:contracts
 
       - name: Run tests
-        run: npm test
+        run: nix develop --command npm test
 
       - name: Publish to npm
-        run: npm publish
+        run: nix develop --command npm publish
