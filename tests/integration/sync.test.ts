@@ -46,6 +46,18 @@ function git(args: string[], cwd: string, env?: NodeJS.ProcessEnv) {
 	return result.stdout.trim();
 }
 
+function jj(args: string[], cwd: string) {
+	const result = run('jj', args, cwd);
+	if (result.status !== 0) {
+		throw new Error(
+			[result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n') || `jj failed: ${args.join(' ')}`,
+		);
+	}
+	return result.stdout.trim();
+}
+
+const jjAvailable = run('jj', ['--version'], repoRoot).status === 0;
+
 function configureUser(repo: string) {
 	git(['config', 'user.name', 'github-actions[bot]'], repo);
 	git(['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], repo);
@@ -831,6 +843,90 @@ test('integration sync CLI dry-run detects apply conflicts without mutating loca
 		expect(run('git', ['rev-parse', '--verify', '--quiet', 'sync/integration'], dryRunWork).status).not.toBe(0);
 		// Local files should NOT have been modified
 		expect(readFileSync(path.join(dryRunWork, 'README.md'), 'utf8').trim()).toBe('# Upstream Project');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test.skipIf(!jjAvailable)('integration sync CLI dry-run leaves colocated jj working copies untouched', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-jj-dry-run-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const dryRunWork = path.join(tempRoot, 'dry-run-work');
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+		createPatchBranch(forkSeed, 'patch/test', 'upstream/main', 'PATCH.txt', 'patch content');
+
+		git(['clone', forkBare, dryRunWork], tempRoot);
+		configureUser(dryRunWork);
+		jj(['git', 'init', '--colocate'], dryRunWork);
+		writeFileSync(path.join(dryRunWork, 'ACTIVE.txt'), 'active working-copy change\n');
+
+		const beforeHead = git(['rev-parse', 'HEAD'], dryRunWork);
+		const beforeRefs = git(
+			['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes', 'refs/tags'],
+			dryRunWork,
+		)
+			.split(/\r?\n/)
+			.filter(Boolean)
+			.sort()
+			.join('\n');
+		const beforeRemotes = git(['remote', '-v'], dryRunWork);
+		const beforeParent = jj(['log', '-r', '@', '-T', 'parents.map(|p| p.commit_id()).join(" ")'], dryRunWork);
+		const beforeStatus = git(['status', '--porcelain=v2'], dryRunWork);
+
+		const dryRunOut = path.join(tempRoot, 'dry-run.out');
+		const dryRunResult = runSync(
+			dryRunWork,
+			stateDir,
+			dryRunOut,
+			path.join(tempRoot, 'dry-run.summary'),
+			'patch/test',
+			'main',
+			'',
+			false,
+			upstreamBare,
+			false,
+			true,
+		);
+
+		expectSuccess(dryRunResult);
+		expect(readOutput(dryRunOut, 'status')).toBe('dry_run');
+		expect(git(['rev-parse', 'HEAD'], dryRunWork)).toBe(beforeHead);
+		expect(git(['status', '--porcelain=v2'], dryRunWork)).toBe(beforeStatus);
+		expect(
+			git(
+				['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes', 'refs/tags'],
+				dryRunWork,
+			)
+				.split(/\r?\n/)
+				.filter(Boolean)
+				.sort()
+				.join('\n'),
+		).toBe(beforeRefs);
+		expect(git(['remote', '-v'], dryRunWork)).toBe(beforeRemotes);
+		expect(jj(['log', '-r', '@', '-T', 'parents.map(|p| p.commit_id()).join(" ")'], dryRunWork)).toBe(beforeParent);
+		expect(readFileSync(path.join(dryRunWork, 'ACTIVE.txt'), 'utf8')).toBe('active working-copy change\n');
+		expect(existsSync(path.join(dryRunWork, 'PATCH.txt'))).toBe(false);
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}
