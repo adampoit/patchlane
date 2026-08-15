@@ -14,6 +14,7 @@ import { parseUpstreamSource } from './upstream-source.js';
 import { createWorkspace, formatWorkspaceCreateJson, formatWorkspaceCreateResult } from './workspace-create.js';
 import { formatWorkspaceStatus, formatWorkspaceStatusJson, inspectWorkspaceStatus } from './workspace-status.js';
 import { formatWorkspaceLand, formatWorkspaceLandJson, landWorkspace, WorkspaceLandError } from './workspace-land.js';
+import { formatWorkspaceList, formatWorkspaceListJson, listWorkspaces } from './workspace-list.js';
 import { formatWorkspaceRemove, formatWorkspaceRemoveJson, removeWorkspace } from './workspace-remove.js';
 
 const cli = cac('patchlane');
@@ -126,7 +127,7 @@ cli.command('doctor', 'Check Patchlane configuration without changing repository
 		if (!report.ok) process.exitCode = 1;
 	});
 
-cli.command('workspace <action>', 'Create, inspect, land, or remove a composed Patchlane workspace')
+cli.command('workspace <action>', 'Create, list, inspect, land, or remove a composed Patchlane workspace')
 	.option('--lane <ref>', 'Configured target lane or landing override')
 	.option('--path <directory>', 'Destination worktree path')
 	.option('--name <name>', 'Workspace identifier')
@@ -161,6 +162,11 @@ cli.command('workspace <action>', 'Create, inspect, land, or remove a composed P
 				);
 				return;
 			}
+			if (action === 'list') {
+				const result = listWorkspaces();
+				process.stdout.write(`${args.json ? formatWorkspaceListJson(result) : formatWorkspaceList(result)}\n`);
+				return;
+			}
 			if (action === 'status') {
 				const result = inspectWorkspaceStatus();
 				process.stdout.write(
@@ -187,7 +193,7 @@ cli.command('workspace <action>', 'Create, inspect, land, or remove a composed P
 				);
 				return;
 			}
-			throw new Error(`Unknown workspace action '${action}'. Use create, status, land, or remove.`);
+			throw new Error(`Unknown workspace action '${action}'. Use create, list, status, land, or remove.`);
 		} catch (error) {
 			workspaceError(error, args.json === true);
 		}

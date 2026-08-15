@@ -2,6 +2,17 @@
 
 Patchlane workspaces provide the complete composed fork while keeping commits assigned to one configured patch lane.
 
+## List workspaces
+
+From any worktree in the configured repository, list the registered workspaces:
+
+```bash
+npx patchlane workspace list
+npx patchlane workspace list --json
+```
+
+The list reports each workspace's identifier, path, branch, target lane, and creation time. It reads local metadata from the repository's common Git directory and does not fetch or modify refs.
+
 ## Create a workspace
 
 From a configured repository worktree:

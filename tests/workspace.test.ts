@@ -7,6 +7,7 @@ import { createWorkspace } from '../src/workspace-create.js';
 import { landWorkspace, WorkspaceLandError } from '../src/workspace-land.js';
 import { removeWorkspace } from '../src/workspace-remove.js';
 import { inspectWorkspaceStatus } from '../src/workspace-status.js';
+import { formatWorkspaceList, formatWorkspaceListJson, listWorkspaces } from '../src/workspace-list.js';
 import { readWorkspaceState, workspaceStatePath } from '../src/workspace-state.js';
 
 type FixtureKind = 'basic' | 'conflict' | 'overlap';
@@ -154,6 +155,18 @@ test('creates, round-trips, lands, persists state, and removes a workspace', () 
 		});
 		expect(existsSync(workspaceStatePath(fixture.repository, 'product'))).toBe(true);
 		expect(readWorkspaceState(fixture.repository, 'product')).toMatchObject(created.state);
+		const listed = listWorkspaces({ cwd: fixture.repository });
+		expect(listed).toEqual([
+			{
+				id: 'product',
+				path: created.state.path,
+				branch: 'patchlane/work/product',
+				targetLane: 'patch/product',
+				createdAt: created.state.createdAt,
+			},
+		]);
+		expect(formatWorkspaceList(listed)).toContain(`Path:        ${created.state.path}`);
+		expect(JSON.parse(formatWorkspaceListJson(listed))).toEqual(listed);
 
 		expect(inspectWorkspaceStatus({ cwd: fixture.workspace }).landingStatus).toBe('nothing_to_land');
 		commitWorkspaceChange(fixture, 'product patch\nworkspace change\n', 'Change product patch');
