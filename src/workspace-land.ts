@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadPatchlaneConfig, loadPatchlaneConfigAtRef } from './config.js';
 import { composeIntoWorktree, resolveCompositionPlan, type CompositionPlan } from './composition.js';
+import { PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC, withIsolatedGitConfig } from './git-environment.js';
 import { ensureGitIdentity, git, gitResult } from './git.js';
 import { inspectWorkspaceStatus, type WorkspaceStatus } from './workspace-status.js';
 import { findWorkspaceState, worktreeForBranch, writeWorkspaceState, type WorkspaceState } from './workspace-state.js';
@@ -91,13 +92,14 @@ function replayWorkspaceCommits(cwd: string, status: WorkspaceStatus, targetLane
 			.join('. ');
 		throw new WorkspaceLandError(
 			'workspace_conflict',
-			`Workspace commit ${commit.slice(0, 7)} could not be projected onto ${targetLane}.${diagnostic ? ` ${diagnostic}.` : ''}`,
+			`Workspace commit ${commit.slice(0, 7)} could not be projected onto ${targetLane}.${diagnostic ? ` ${diagnostic}.` : ''} ${PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC}`,
 			{
 				workspaceCommit: commit,
 				targetLane,
 				conflictedPaths,
 				likelyOriginatingLanes,
 				reproduction: `git cherry-pick ${commit}`,
+				gitConfiguration: PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC,
 			},
 		);
 	}
@@ -256,7 +258,7 @@ function localLaneLease(cwd: string, lane: string, expected: string) {
 	return actual ?? '';
 }
 
-export function landWorkspace(options: WorkspaceLandOptions = {}): WorkspaceLandResult {
+function landWorkspaceInternal(options: WorkspaceLandOptions = {}): WorkspaceLandResult {
 	const cwd = options.cwd ?? process.cwd();
 	const state = findWorkspaceState(cwd);
 	const status = inspectWorkspaceStatus({ cwd, state });
@@ -464,6 +466,10 @@ export function landWorkspace(options: WorkspaceLandOptions = {}): WorkspaceLand
 			removeCandidateWorktree(cwd, targetCandidate.parent, targetCandidate.worktreePath, targetRef);
 		else removeCandidate(cwd, targetRef);
 	}
+}
+
+export function landWorkspace(options: WorkspaceLandOptions = {}): WorkspaceLandResult {
+	return withIsolatedGitConfig(() => landWorkspaceInternal(options));
 }
 
 export const runWorkspaceLand = landWorkspace;

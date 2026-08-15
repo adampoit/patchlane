@@ -112,6 +112,12 @@ npx patchlane sync
 
 `--no-push` remains as a legacy alias for `--skip-push`.
 
+### Reproducible Git composition
+
+Composition, integration dry-runs, and workspace landing use stock Git merge behavior. Patchlane runs its Git subprocesses with temporary system and global config files and an empty global attributes file, so user-installed merge drivers and external merge resolvers such as Mergiraf are not used by default. The repository's checked-in `.gitattributes` and repository-local Git configuration remain active, and Patchlane supplies only the local identity needed for generated commits.
+
+A composition conflict is therefore reproducible in CI with stock Git. Configure any external resolver explicitly and identically in both local and CI environments only as a future, pinned opt-in; it is not part of the default Patchlane contract.
+
 ### Bootstrap the first promotion
 
 ```bash

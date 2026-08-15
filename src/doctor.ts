@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
+import { patchlaneGitEnvironment, withIsolatedGitConfig } from './git-environment.js';
 import { loadPatchlaneConfig, type PatchlaneConfig } from './config.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy } from './workflow-policy.js';
@@ -45,8 +46,8 @@ function run(command: string, args: string[], cwd: string, options: RunOptions =
 	};
 }
 
-function git(args: string[], cwd: string, options?: RunOptions) {
-	return run('git', args, cwd, options);
+function git(args: string[], cwd: string, options: RunOptions = {}) {
+	return run('git', args, cwd, { ...options, env: patchlaneGitEnvironment(options.env) });
 }
 
 function remoteUrl(cwd: string, remote: string) {
@@ -601,7 +602,7 @@ function inspectBootstrap(config: PatchlaneConfig, cwd: string, checks: DoctorCh
 	}
 }
 
-export function runDoctor(options: DoctorOptions = {}): DoctorReport {
+function runDoctorInternal(options: DoctorOptions = {}): DoctorReport {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
 	const checks: DoctorCheck[] = [];
 	let config: PatchlaneConfig;
@@ -628,6 +629,10 @@ export function runDoctor(options: DoctorOptions = {}): DoctorReport {
 		{ ok: !checks.some((check) => check.severity === 'error'), resolvedSource: resolved?.label, checks },
 		options.json ?? false,
 	);
+}
+
+export function runDoctor(options: DoctorOptions = {}): DoctorReport {
+	return withIsolatedGitConfig(() => runDoctorInternal(options));
 }
 
 function printReport(report: DoctorReport, json: boolean) {

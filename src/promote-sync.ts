@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { patchlaneGitEnvironment, withIsolatedGitConfig } from './git-environment.js';
 import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
 type RunOptions = {
@@ -29,7 +30,7 @@ function requireEnv(name: string) {
 function run(command: string, args: string[], options: RunOptions = {}) {
 	const result = spawnSync(command, args, {
 		cwd: process.cwd(),
-		env: process.env,
+		env: command === 'git' ? patchlaneGitEnvironment() : process.env,
 		encoding: 'utf8',
 	});
 
@@ -87,7 +88,7 @@ export type PromoteSyncOptions = {
 	originRemoteName?: string;
 };
 
-export function runPromoteSync(options: PromoteSyncOptions) {
+function runPromoteSyncInternal(options: PromoteSyncOptions) {
 	configureGitIdentity();
 
 	const baseBranch = options.baseBranch ?? 'main';
@@ -182,6 +183,10 @@ export function runPromoteSync(options: PromoteSyncOptions) {
 		].join('\n'),
 	);
 	log("Integration promotion completed with status 'promoted'");
+}
+
+export function runPromoteSync(options: PromoteSyncOptions) {
+	return withIsolatedGitConfig(() => runPromoteSyncInternal(options));
 }
 
 function main() {

@@ -3,6 +3,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+	PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC,
+	patchlaneGitEnvironment,
+	withIsolatedGitConfig,
+} from './git-environment.js';
 import { resolveUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
@@ -52,7 +57,7 @@ function parsePatchRefs(value: string) {
 function run(command: string, args: string[], options: RunOptions = {}) {
 	const result = spawnSync(command, args, {
 		cwd: options.cwd ?? defaultCwd,
-		env: options.env ?? process.env,
+		env: command === 'git' ? patchlaneGitEnvironment(options.env) : (options.env ?? process.env),
 		encoding: options.encoding ?? 'utf8',
 	});
 
@@ -287,7 +292,7 @@ function isBasedOnSyncBranch(resolved: string, remoteSyncRef: string, cwd = defa
 }
 
 export function runIntegrationSync(options: IntegrationSyncOptions) {
-	return runIntegrationSyncInternal(options);
+	return withIsolatedGitConfig(() => runIntegrationSyncInternal(options));
 }
 
 function runIntegrationSyncInternal(options: InternalIntegrationSyncOptions) {
@@ -642,6 +647,7 @@ function runIntegrationSyncInternal(options: InternalIntegrationSyncOptions) {
 					sectionParts.push(
 						`### Reproduction\n\n\`\`\`bash\ngit fetch origin ${ref}\ngit cherry-pick ${commitSha}\n\`\`\``,
 					);
+					sectionParts.push(`### Git merge configuration\n\n${PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC}`);
 
 					writeOutput('failed_bookmark', ref);
 					writeOutput('failed_commit', commitSha);

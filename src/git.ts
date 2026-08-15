@@ -1,5 +1,6 @@
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import path from 'node:path';
+import { patchlaneGitEnvironment } from './git-environment.js';
 
 export type ProcessResult = {
 	status: number;
@@ -34,7 +35,7 @@ export function runProcess(
 ): ProcessResult {
 	const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
 		cwd,
-		env: options.env ?? process.env,
+		env: command === 'git' ? patchlaneGitEnvironment(options.env) : (options.env ?? process.env),
 		encoding: 'utf8',
 		input: options.input,
 	};

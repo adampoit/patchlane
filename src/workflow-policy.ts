@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
+import { gitResult } from './git.js';
 
 const WORKFLOW_DIRECTORY = '.github/workflows';
 const LOCAL_WORKFLOW_PREFIX = `./${WORKFLOW_DIRECTORY}/`;
@@ -91,13 +91,10 @@ export function validateWorkflowPolicy(
 }
 
 export function workflowFilesAtRef(cwd: string, ref: string): WorkflowFile[] {
-	const listed = spawnSync('git', ['ls-tree', '-r', '--name-only', ref, '--', WORKFLOW_DIRECTORY], {
-		cwd,
-		encoding: 'utf8',
-	});
-	if (listed.error || listed.status !== 0) {
+	const listed = gitResult(['ls-tree', '-r', '--name-only', ref, '--', WORKFLOW_DIRECTORY], cwd);
+	if (listed.status !== 0) {
 		throw new Error(
-			`Could not inspect workflows at ${ref}: ${(listed.error?.message ?? listed.stderr.trim()) || 'git ls-tree failed'}`,
+			`Could not inspect workflows at ${ref}: ${listed.stderr.trim() || listed.stdout.trim() || 'git ls-tree failed'}`,
 		);
 	}
 
@@ -105,10 +102,10 @@ export function workflowFilesAtRef(cwd: string, ref: string): WorkflowFile[] {
 		.split(/\r?\n/)
 		.filter((file) => file.startsWith(`${WORKFLOW_DIRECTORY}/`) && /\.ya?ml$/.test(file))
 		.map((file) => {
-			const shown = spawnSync('git', ['show', `${ref}:${file}`], { cwd, encoding: 'utf8' });
-			if (shown.error || shown.status !== 0) {
+			const shown = gitResult(['show', `${ref}:${file}`], cwd);
+			if (shown.status !== 0) {
 				throw new Error(
-					`Could not read workflow '${file}' at ${ref}: ${(shown.error?.message ?? shown.stderr.trim()) || 'git show failed'}`,
+					`Could not read workflow '${file}' at ${ref}: ${shown.stderr.trim() || shown.stdout.trim() || 'git show failed'}`,
 				);
 			}
 			return { file: file.slice(WORKFLOW_DIRECTORY.length + 1), content: shown.stdout };

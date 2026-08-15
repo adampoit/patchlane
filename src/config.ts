@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { parse, stringify } from 'yaml';
+import { withIsolatedGitConfig } from './git-environment.js';
+import { gitResult } from './git.js';
 import { parseUpstreamSource } from './upstream-source.js';
 
 export const PATCHLANE_CONFIG_FILE = '.patchlane.yml';
@@ -219,15 +220,12 @@ export function loadPatchlaneConfig(cwd = process.cwd(), configPath?: string): P
 }
 
 export function loadPatchlaneConfigAtRef(cwd = process.cwd(), ref: string): PatchlaneConfig {
-	const result = spawnSync('git', ['show', `${ref}:${PATCHLANE_CONFIG_FILE}`], {
-		cwd,
-		encoding: 'utf8',
+	return withIsolatedGitConfig(() => {
+		const result = gitResult(['show', `${ref}:${PATCHLANE_CONFIG_FILE}`], cwd);
+		if (result.status !== 0) {
+			const detail = [result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n');
+			throw new Error(`Could not load ${PATCHLANE_CONFIG_FILE} at ref '${ref}': ${detail || 'git show failed'}`);
+		}
+		return parsePatchlaneConfigText(result.stdout, `${ref}:${PATCHLANE_CONFIG_FILE}`);
 	});
-	if (result.error || result.status !== 0) {
-		const detail = [result.stderr?.trim(), result.stdout?.trim()].filter(Boolean).join('\n');
-		throw new Error(
-			`Could not load ${PATCHLANE_CONFIG_FILE} at ref '${ref}': ${detail || result.error?.message || 'git show failed'}`,
-		);
-	}
-	return parsePatchlaneConfigText(result.stdout, `${ref}:${PATCHLANE_CONFIG_FILE}`);
 }
