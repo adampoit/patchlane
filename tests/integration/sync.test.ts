@@ -56,8 +56,6 @@ function jj(args: string[], cwd: string) {
 	return result.stdout.trim();
 }
 
-const jjAvailable = run('jj', ['--version'], repoRoot).status === 0;
-
 function configureUser(repo: string) {
 	git(['config', 'user.name', 'github-actions[bot]'], repo);
 	git(['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], repo);
@@ -848,7 +846,7 @@ test('integration sync CLI dry-run detects apply conflicts without mutating loca
 	}
 });
 
-test.skipIf(!jjAvailable)('integration sync CLI dry-run leaves colocated jj working copies untouched', () => {
+test('integration sync CLI dry-run leaves colocated jj working copies untouched', () => {
 	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-jj-dry-run-'));
 	try {
 		const stateDir = path.join(tempRoot, 'gh-state');
