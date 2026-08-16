@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC, withIsolatedGitConfig } from './git-environment.js';
+import { runProcess } from './git.js';
 import { resolveUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
 type RunOptions = {
 	cwd?: string;
 	allowFailure?: boolean;
-	encoding?: BufferEncoding | 'buffer';
 	env?: NodeJS.ProcessEnv;
 };
 
@@ -50,16 +51,27 @@ function parsePatchRefs(value: string) {
 }
 
 function run(command: string, args: string[], options: RunOptions = {}) {
+	if (command === 'git') {
+		const result = runProcess(command, args, options.cwd ?? defaultCwd, { env: options.env });
+		if (!options.allowFailure && result.status !== 0) {
+			fail(
+				[result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n') ||
+					`${command} exited with status ${result.status}`,
+			);
+		}
+		return result;
+	}
+
 	const result = spawnSync(command, args, {
 		cwd: options.cwd ?? defaultCwd,
 		env: options.env ?? process.env,
-		encoding: options.encoding ?? 'utf8',
+		encoding: 'utf8',
 	});
 
 	if (result.error) throw result.error;
 	if (!options.allowFailure && result.status !== 0) {
-		const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : result.stderr.toString('utf8').trim();
-		const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : result.stdout.toString('utf8').trim();
+		const stderr = result.stderr.trim();
+		const stdout = result.stdout.trim();
 		fail([stderr, stdout].filter(Boolean).join('\n') || `${command} exited with status ${result.status ?? 1}`);
 	}
 
@@ -67,20 +79,11 @@ function run(command: string, args: string[], options: RunOptions = {}) {
 }
 
 function runText(command: string, args: string[], options: RunOptions = {}) {
-	const result = run(command, args, { ...options, encoding: 'utf8' });
+	const result = run(command, args, options);
 	return {
 		status: result.status ?? 0,
 		stdout: result.stdout as string,
 		stderr: result.stderr as string,
-	};
-}
-
-function runBuffer(command: string, args: string[], options: RunOptions = {}) {
-	const result = run(command, args, { ...options, encoding: 'buffer' });
-	return {
-		status: result.status ?? 0,
-		stdout: result.stdout as Buffer,
-		stderr: result.stderr as Buffer,
 	};
 }
 
@@ -185,10 +188,6 @@ function parseConflictPaths(output: string) {
 	);
 }
 
-function tmpFile(name: string) {
-	return path.join(mkdtempSync(path.join(tmpdir(), `${name}-`)), 'payload');
-}
-
 function configureGitIdentity(cwd = defaultCwd) {
 	const name = git(['config', 'user.name'], {
 		allowFailure: true,
@@ -287,7 +286,7 @@ function isBasedOnSyncBranch(resolved: string, remoteSyncRef: string, cwd = defa
 }
 
 export function runIntegrationSync(options: IntegrationSyncOptions) {
-	return runIntegrationSyncInternal(options);
+	return withIsolatedGitConfig(() => runIntegrationSyncInternal(options));
 }
 
 function runIntegrationSyncInternal(options: InternalIntegrationSyncOptions) {
@@ -642,6 +641,7 @@ function runIntegrationSyncInternal(options: InternalIntegrationSyncOptions) {
 					sectionParts.push(
 						`### Reproduction\n\n\`\`\`bash\ngit fetch origin ${ref}\ngit cherry-pick ${commitSha}\n\`\`\``,
 					);
+					sectionParts.push(`### Git merge configuration\n\n${PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC}`);
 
 					writeOutput('failed_bookmark', ref);
 					writeOutput('failed_commit', commitSha);

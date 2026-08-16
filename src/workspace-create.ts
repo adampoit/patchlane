@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { withIsolatedGitConfig } from './git-environment.js';
 import { loadPatchlaneConfig, loadPatchlaneConfigAtRef, type PatchlaneConfig } from './config.js';
 import { resolveCompositionPlan, composeIntoWorktree, type CompositionPlan } from './composition.js';
 import { git, gitResult, currentBranch, gitTopLevel } from './git.js';
@@ -80,7 +81,7 @@ function loadConfig(cwd: string, configRef: string | undefined): { config: Patch
 	return { config, ref: configuredRef(cwd) };
 }
 
-export function createWorkspace(options: WorkspaceCreateOptions): WorkspaceCreateResult {
+function createWorkspaceInternal(options: WorkspaceCreateOptions): WorkspaceCreateResult {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
 	if (!options.lane || !options.lane.trim()) throw new Error('workspace create requires --lane <ref>.');
 	const targetLane = options.lane.trim();
@@ -150,6 +151,10 @@ export function createWorkspace(options: WorkspaceCreateOptions): WorkspaceCreat
 		if (worktreeCreated || branchCreated) cleanUpWorkspace(cwd, destination, branch, id);
 		throw error;
 	}
+}
+
+export function createWorkspace(options: WorkspaceCreateOptions): WorkspaceCreateResult {
+	return withIsolatedGitConfig(() => createWorkspaceInternal(options));
 }
 
 export const runWorkspaceCreate = createWorkspace;

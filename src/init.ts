@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
+import { withIsolatedGitConfig } from './git-environment.js';
 import {
 	parseAllowedWorkflows,
 	PATCHLANE_CONFIG_FILE,
@@ -9,6 +9,7 @@ import {
 	type PatchlaneConfig,
 } from './config.js';
 import { getPackageVersion } from './package-version.js';
+import { gitResult } from './git.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { renderPromotionWorkflow, renderSyncWorkflow } from './workflow-templates.js';
 
@@ -25,9 +26,8 @@ export type InitOptions = {
 };
 
 function git(args: string[], cwd: string) {
-	const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-	if (result.error) throw result.error;
-	return { status: result.status ?? 1, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
+	const result = gitResult(args, cwd);
+	return { status: result.status, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
 }
 
 function parseGithubRepository(remoteUrl: string) {
@@ -84,7 +84,7 @@ function writeNewFile(filePath: string, contents: string) {
 	writeFileSync(filePath, contents);
 }
 
-export function initializePatchlane(options: InitOptions = {}) {
+function initializePatchlaneInternal(options: InitOptions = {}) {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
 	const upstream = options.upstream ?? detectUpstream(cwd);
 	if (!upstream) {
@@ -145,4 +145,8 @@ export function initializePatchlane(options: InitOptions = {}) {
 		].join('\n') + '\n',
 	);
 	return config;
+}
+
+export function initializePatchlane(options: InitOptions = {}) {
+	return withIsolatedGitConfig(() => initializePatchlaneInternal(options));
 }

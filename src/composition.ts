@@ -1,6 +1,7 @@
 import type { PatchlaneConfig } from './config.js';
 import { CompositionError } from './composition-errors.js';
 import { ensureGitIdentity, git, gitResult, isValidRefName, objectExists, runProcess } from './git.js';
+import { PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC, withIsolatedGitConfig } from './git-environment.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
@@ -330,7 +331,7 @@ function resolveLanePlan(
 	};
 }
 
-export function resolveCompositionPlan(
+function resolveCompositionPlanInternal(
 	config: PatchlaneConfig,
 	options: ResolveCompositionOptions = {},
 ): CompositionPlan {
@@ -446,19 +447,31 @@ function replayCommit(
 		}
 		const paths = conflictPaths(cwd, output);
 		gitResult(['cherry-pick', '--abort'], cwd, { allowFailure: true });
-		throw new CompositionError('conflict', `Failed to replay commit ${commitSha.slice(0, 7)} from ${lane.ref}.`, {
-			lane: lane.ref,
-			commit: commitSha,
-			conflictedPaths: paths,
-			output: output.trim(),
-		});
+		throw new CompositionError(
+			'conflict',
+			`Failed to replay commit ${commitSha.slice(0, 7)} from ${lane.ref}. ${PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC}`,
+			{
+				lane: lane.ref,
+				commit: commitSha,
+				conflictedPaths: paths,
+				output: output.trim(),
+				gitConfiguration: PATCHLANE_GIT_CONFIGURATION_DIAGNOSTIC,
+			},
+		);
 	}
 
 	if (recordProvenanceTrailers) git(['commit', '--amend', '-m', commitMessage(cwd, lane, commitSha)], cwd);
 	return { generatedSha: git(['rev-parse', 'HEAD^{commit}'], cwd), empty: false };
 }
 
-export function composeIntoWorktree(
+export function resolveCompositionPlan(
+	config: PatchlaneConfig,
+	options: ResolveCompositionOptions = {},
+): CompositionPlan {
+	return withIsolatedGitConfig(() => resolveCompositionPlanInternal(config, options));
+}
+
+function composeIntoWorktreeInternal(
 	plan: CompositionPlan,
 	options: {
 		cwd: string;
@@ -524,6 +537,17 @@ export function composeIntoWorktree(
 	}
 
 	return { headSha, treeSha, appliedLanes, generatedCommits };
+}
+
+export function composeIntoWorktree(
+	plan: CompositionPlan,
+	options: {
+		cwd: string;
+		laneOverrides?: Record<string, string>;
+		recordProvenanceTrailers?: boolean;
+	},
+): CompositionResult {
+	return withIsolatedGitConfig(() => composeIntoWorktreeInternal(plan, options));
 }
 
 export function compositionWorkflowViolations(cwd: string, plan: CompositionPlan, commit: string) {

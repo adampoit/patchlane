@@ -1,3 +1,4 @@
+import { withIsolatedGitConfig } from './git-environment.js';
 import { findWorkspaceState, worktreeForBranch, type WorkspaceState } from './workspace-state.js';
 import { git, gitResult, headSha } from './git.js';
 
@@ -47,7 +48,7 @@ function laneTip(cwd: string, state: WorkspaceState, ref: string) {
 	return remote ?? local;
 }
 
-export function inspectWorkspaceStatus(options: { cwd?: string; state?: WorkspaceState } = {}): WorkspaceStatus {
+function inspectWorkspaceStatusInternal(options: { cwd?: string; state?: WorkspaceState } = {}): WorkspaceStatus {
 	const cwd = options.cwd ?? process.cwd();
 	const state = options.state ?? findWorkspaceState(cwd);
 	const workspaceHead = headSha(cwd);
@@ -101,6 +102,10 @@ export function inspectWorkspaceStatus(options: { cwd?: string; state?: Workspac
 		landingStatus,
 		state,
 	};
+}
+
+export function inspectWorkspaceStatus(options: { cwd?: string; state?: WorkspaceState } = {}): WorkspaceStatus {
+	return withIsolatedGitConfig(() => inspectWorkspaceStatusInternal(options));
 }
 
 export const runWorkspaceStatus = inspectWorkspaceStatus;

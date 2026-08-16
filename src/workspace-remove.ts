@@ -1,4 +1,5 @@
 import { rmSync } from 'node:fs';
+import { withIsolatedGitConfig } from './git-environment.js';
 import { findWorkspaceState, workspaceStatePath } from './workspace-state.js';
 import { gitResult, listWorktrees } from './git.js';
 import { inspectWorkspaceStatus } from './workspace-status.js';
@@ -14,7 +15,7 @@ export type WorkspaceRemoveResult = {
 	branch: string;
 };
 
-export function removeWorkspace(options: WorkspaceRemoveOptions = {}): WorkspaceRemoveResult {
+function removeWorkspaceInternal(options: WorkspaceRemoveOptions = {}): WorkspaceRemoveResult {
 	const cwd = options.cwd ?? process.cwd();
 	const state = findWorkspaceState(cwd);
 	const stateFile = workspaceStatePath(cwd, state.id);
@@ -56,6 +57,10 @@ export function removeWorkspace(options: WorkspaceRemoveOptions = {}): Workspace
 	for (const ref of refs) gitResult(['update-ref', '-d', ref], repositoryCwd, { allowFailure: true });
 	rmSync(stateFile, { force: true });
 	return { id: state.id, path: state.path, branch: state.branch };
+}
+
+export function removeWorkspace(options: WorkspaceRemoveOptions = {}): WorkspaceRemoveResult {
+	return withIsolatedGitConfig(() => removeWorkspaceInternal(options));
 }
 
 export const runWorkspaceRemove = removeWorkspace;

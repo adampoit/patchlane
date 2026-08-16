@@ -139,6 +139,7 @@ function runSync(
 	dryRun = false,
 	forcePush = false,
 	allowedWorkflows?: string,
+	environment: NodeJS.ProcessEnv = {},
 ) {
 	const launcherDir = mkdtempSync(path.join(tmpdir(), 'patchlane-gh-'));
 	createLauncher(launcherDir);
@@ -162,6 +163,7 @@ function runSync(
 		UPSTREAM_REMOTE_URL: upstreamRemoteUrl,
 		ALLOW_DEPENDENT_PATCHES: allowDependentPatches ? 'true' : 'false',
 		...(allowedWorkflows === undefined ? {} : { ALLOWED_WORKFLOWS: allowedWorkflows }),
+		...environment,
 	};
 
 	const result = run('node', [cliPath], worktree, env);
@@ -841,6 +843,143 @@ test('integration sync CLI dry-run detects apply conflicts without mutating loca
 		expect(run('git', ['rev-parse', '--verify', '--quiet', 'sync/integration'], dryRunWork).status).not.toBe(0);
 		// Local files should NOT have been modified
 		expect(readFileSync(path.join(dryRunWork, 'README.md'), 'utf8').trim()).toBe('# Upstream Project');
+	} finally {
+		rmSync(tempRoot, { force: true, recursive: true });
+	}
+});
+
+test('integration sync CLI ignores user merge drivers during dry-run composition', () => {
+	const tempRoot = mkdtempSync(path.join(tmpdir(), 'patchlane-git-config-'));
+	try {
+		const stateDir = path.join(tempRoot, 'gh-state');
+		mkdirSync(stateDir, { recursive: true });
+
+		const upstreamBare = path.join(tempRoot, 'upstream.git');
+		const forkBare = path.join(tempRoot, 'fork.git');
+		const upstreamWork = path.join(tempRoot, 'upstream-work');
+		const forkSeed = path.join(tempRoot, 'fork-seed');
+		const customWork = path.join(tempRoot, 'custom-work');
+		const stockWork = path.join(tempRoot, 'stock-work');
+		const userConfig = path.join(tempRoot, 'user.gitconfig');
+		const systemConfig = path.join(tempRoot, 'system.gitconfig');
+		const globalAttributes = path.join(tempRoot, 'global.attributes');
+		const mergeDriver = path.join(tempRoot, 'merge-driver.mjs');
+		const emptyHome = path.join(tempRoot, 'home');
+		const emptyXdg = path.join(tempRoot, 'xdg');
+		mkdirSync(emptyHome, { recursive: true });
+		mkdirSync(emptyXdg, { recursive: true });
+
+		git(['init', '--bare', '--initial-branch=main', upstreamBare], tempRoot);
+		git(['clone', upstreamBare, upstreamWork], tempRoot);
+		configureUser(upstreamWork);
+		writeFileSync(path.join(upstreamWork, 'README.md'), '# Upstream Project\n');
+		git(['add', 'README.md'], upstreamWork);
+		git(['commit', '-m', 'Initial upstream release'], upstreamWork);
+		git(['push', 'origin', 'main'], upstreamWork);
+		git(['-c', 'tag.gpgSign=false', 'tag', '-a', 'v1.0.0', '-m', 'v1.0.0'], upstreamWork);
+		git(['push', 'origin', 'v1.0.0'], upstreamWork);
+
+		git(['init', '--bare', '--initial-branch=main', forkBare], tempRoot);
+		git(['clone', upstreamBare, forkSeed], tempRoot);
+		configureUser(forkSeed);
+		git(['remote', 'rename', 'origin', 'upstream'], forkSeed);
+		git(['remote', 'add', 'origin', forkBare], forkSeed);
+		git(['push', 'origin', 'main'], forkSeed);
+
+		createUpstreamRelease(upstreamWork, upstreamBare, 'v1.1.0', 'v1.1.0', '# Upstream Project v1.1.0');
+		createPatchBranch(forkSeed, 'patch/conflict', 'v1.0.0', 'README.md', '# Fork Conflict');
+		writeReleasesState(stateDir, [
+			{
+				tag_name: 'v1.1.0',
+				html_url: 'https://example.test/upstream/releases/tag/v1.1.0',
+				draft: false,
+				prerelease: false,
+			},
+		]);
+		writeFileSync(path.join(stateDir, 'prs.json'), '[]\n');
+
+		writeFileSync(mergeDriver, 'process.exit(0);\n');
+		writeFileSync(globalAttributes, '* merge=patchlane-test\n');
+		writeFileSync(
+			userConfig,
+			[
+				'[core]',
+				`\tattributesFile = ${globalAttributes}`,
+				'[merge "patchlane-test"]',
+				`\tdriver = ${process.execPath} ${mergeDriver} %O %A %B`,
+				'',
+			].join('\n'),
+		);
+		writeFileSync(systemConfig, '');
+		const userConfigBefore = readFileSync(userConfig, 'utf8');
+		const customGitEnvironment = {
+			...process.env,
+			GIT_CONFIG_GLOBAL: userConfig,
+			GIT_CONFIG_SYSTEM: systemConfig,
+		};
+
+		git(['clone', forkBare, customWork], tempRoot);
+		configureUser(customWork);
+		expect(git(['check-attr', 'merge', '--', 'README.md'], customWork, customGitEnvironment)).toContain(
+			'patchlane-test',
+		);
+		git(['clone', forkBare, stockWork], tempRoot);
+		configureUser(stockWork);
+
+		const customOut = path.join(tempRoot, 'custom.out');
+		const customSummary = path.join(tempRoot, 'custom.summary');
+		const customRun = runSync(
+			customWork,
+			stateDir,
+			customOut,
+			customSummary,
+			'patch/conflict',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+			false,
+			true,
+			false,
+			undefined,
+			{
+				GIT_CONFIG_GLOBAL: userConfig,
+				GIT_CONFIG_SYSTEM: systemConfig,
+			},
+		);
+
+		const stockOut = path.join(tempRoot, 'stock.out');
+		const stockSummary = path.join(tempRoot, 'stock.summary');
+		const stockRun = runSync(
+			stockWork,
+			stateDir,
+			stockOut,
+			stockSummary,
+			'patch/conflict',
+			'main',
+			'latest',
+			false,
+			upstreamBare,
+			false,
+			true,
+			false,
+			undefined,
+			{
+				GIT_CONFIG_GLOBAL: systemConfig,
+				GIT_CONFIG_SYSTEM: systemConfig,
+				HOME: emptyHome,
+				XDG_CONFIG_HOME: emptyXdg,
+			},
+		);
+
+		expect(customRun.status).not.toBe(0);
+		expect(stockRun.status).not.toBe(0);
+		expect(readOutput(customOut, 'status')).toBe('conflicted');
+		expect(readOutput(stockOut, 'status')).toBe('conflicted');
+		expect(readOutput(customOut, 'conflicted_paths')).toBe('README.md');
+		expect(readOutput(stockOut, 'conflicted_paths')).toBe('README.md');
+		expect(readFileSync(userConfig, 'utf8')).toBe(userConfigBefore);
+		expect(readFileSync(customSummary, 'utf8')).toContain('external merge resolvers are not used by default');
 	} finally {
 		rmSync(tempRoot, { force: true, recursive: true });
 	}
