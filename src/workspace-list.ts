@@ -1,3 +1,4 @@
+import { withIsolatedGitConfig } from './git-environment.js';
 import { listWorkspaceStates, type WorkspaceState } from './workspace-state.js';
 
 export type WorkspaceListEntry = Pick<WorkspaceState, 'id' | 'path' | 'branch' | 'createdAt' | 'targetLane'>;
@@ -7,13 +8,15 @@ export type WorkspaceListOptions = {
 };
 
 export function listWorkspaces(options: WorkspaceListOptions = {}): WorkspaceListEntry[] {
-	return listWorkspaceStates(options.cwd).map(({ id, path, branch, createdAt, targetLane }) => ({
-		id,
-		path,
-		branch,
-		createdAt,
-		targetLane,
-	}));
+	return withIsolatedGitConfig(() =>
+		listWorkspaceStates(options.cwd).map(({ id, path, branch, createdAt, targetLane }) => ({
+			id,
+			path,
+			branch,
+			createdAt,
+			targetLane,
+		})),
+	);
 }
 
 export function formatWorkspaceList(workspaces: WorkspaceListEntry[]) {

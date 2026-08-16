@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { patchlaneGitEnvironment, withIsolatedGitConfig } from './git-environment.js';
+import { withIsolatedGitConfig } from './git-environment.js';
+import { gitResult } from './git.js';
 import { validateWorkflowPolicy, workflowFilesAtRef } from './workflow-policy.js';
 
 type RunOptions = {
@@ -27,30 +27,15 @@ function requireEnv(name: string) {
 	return value;
 }
 
-function run(command: string, args: string[], options: RunOptions = {}) {
-	const result = spawnSync(command, args, {
-		cwd: process.cwd(),
-		env: command === 'git' ? patchlaneGitEnvironment() : process.env,
-		encoding: 'utf8',
-	});
-
-	if (result.error) throw result.error;
+function git(args: string[], options: RunOptions = {}) {
+	const result = gitResult(args, process.cwd());
 	if (!options.allowFailure && result.status !== 0) {
 		fail(
 			[result.stderr.trim(), result.stdout.trim()].filter(Boolean).join('\n') ||
-				`${command} exited with status ${result.status ?? 1}`,
+				`git exited with status ${result.status}`,
 		);
 	}
-
-	return {
-		status: result.status ?? 0,
-		stdout: result.stdout,
-		stderr: result.stderr,
-	};
-}
-
-function git(args: string[], options: RunOptions = {}) {
-	return run('git', args, options);
+	return result;
 }
 
 function writeOutput(key: string, value: string) {

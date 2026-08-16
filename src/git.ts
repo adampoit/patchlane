@@ -1,6 +1,6 @@
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import path from 'node:path';
-import { patchlaneGitEnvironment } from './git-environment.js';
+import { patchlaneGitEnvironment, withIsolatedGitConfig } from './git-environment.js';
 
 export type ProcessResult = {
 	status: number;
@@ -27,12 +27,7 @@ export class GitError extends Error {
 	}
 }
 
-export function runProcess(
-	command: string,
-	args: string[],
-	cwd: string,
-	options: { allowFailure?: boolean; env?: NodeJS.ProcessEnv; input?: string } = {},
-): ProcessResult {
+function runProcessInternal(command: string, args: string[], cwd: string, options: RunGitOptions = {}): ProcessResult {
 	const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
 		cwd,
 		env: command === 'git' ? patchlaneGitEnvironment(options.env) : (options.env ?? process.env),
@@ -49,6 +44,12 @@ export function runProcess(
 		stdout: result.stdout ?? '',
 		stderr: result.stderr ?? '',
 	};
+}
+
+export function runProcess(command: string, args: string[], cwd: string, options: RunGitOptions = {}): ProcessResult {
+	return command === 'git'
+		? withIsolatedGitConfig(() => runProcessInternal(command, args, cwd, options))
+		: runProcessInternal(command, args, cwd, options);
 }
 
 export function gitResult(args: string[], cwd: string, options: RunGitOptions = {}) {

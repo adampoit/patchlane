@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parse } from 'yaml';
-import { patchlaneGitEnvironment, withIsolatedGitConfig } from './git-environment.js';
+import { withIsolatedGitConfig } from './git-environment.js';
+import { runProcess } from './git.js';
 import { loadPatchlaneConfig, type PatchlaneConfig } from './config.js';
 import { parseUpstreamSource } from './upstream-source.js';
 import { validateWorkflowPolicy } from './workflow-policy.js';
@@ -47,7 +48,16 @@ function run(command: string, args: string[], cwd: string, options: RunOptions =
 }
 
 function git(args: string[], cwd: string, options: RunOptions = {}) {
-	return run('git', args, cwd, { ...options, env: patchlaneGitEnvironment(options.env) });
+	const result = runProcess('git', args, cwd, {
+		allowFailure: true,
+		env: options.env,
+		input: options.input,
+	});
+	return {
+		status: result.status,
+		stdout: options.trimOutput === false ? result.stdout : result.stdout.trim(),
+		stderr: options.trimOutput === false ? result.stderr : result.stderr.trim(),
+	};
 }
 
 function remoteUrl(cwd: string, remote: string) {

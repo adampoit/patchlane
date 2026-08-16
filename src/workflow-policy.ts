@@ -1,5 +1,6 @@
 import { parse } from 'yaml';
 import { gitResult } from './git.js';
+import { withIsolatedGitConfig } from './git-environment.js';
 
 const WORKFLOW_DIRECTORY = '.github/workflows';
 const LOCAL_WORKFLOW_PREFIX = `./${WORKFLOW_DIRECTORY}/`;
@@ -91,23 +92,25 @@ export function validateWorkflowPolicy(
 }
 
 export function workflowFilesAtRef(cwd: string, ref: string): WorkflowFile[] {
-	const listed = gitResult(['ls-tree', '-r', '--name-only', ref, '--', WORKFLOW_DIRECTORY], cwd);
-	if (listed.status !== 0) {
-		throw new Error(
-			`Could not inspect workflows at ${ref}: ${listed.stderr.trim() || listed.stdout.trim() || 'git ls-tree failed'}`,
-		);
-	}
+	return withIsolatedGitConfig(() => {
+		const listed = gitResult(['ls-tree', '-r', '--name-only', ref, '--', WORKFLOW_DIRECTORY], cwd);
+		if (listed.status !== 0) {
+			throw new Error(
+				`Could not inspect workflows at ${ref}: ${listed.stderr.trim() || listed.stdout.trim() || 'git ls-tree failed'}`,
+			);
+		}
 
-	return listed.stdout
-		.split(/\r?\n/)
-		.filter((file) => file.startsWith(`${WORKFLOW_DIRECTORY}/`) && /\.ya?ml$/.test(file))
-		.map((file) => {
-			const shown = gitResult(['show', `${ref}:${file}`], cwd);
-			if (shown.status !== 0) {
-				throw new Error(
-					`Could not read workflow '${file}' at ${ref}: ${shown.stderr.trim() || shown.stdout.trim() || 'git show failed'}`,
-				);
-			}
-			return { file: file.slice(WORKFLOW_DIRECTORY.length + 1), content: shown.stdout };
-		});
+		return listed.stdout
+			.split(/\r?\n/)
+			.filter((file) => file.startsWith(`${WORKFLOW_DIRECTORY}/`) && /\.ya?ml$/.test(file))
+			.map((file) => {
+				const shown = gitResult(['show', `${ref}:${file}`], cwd);
+				if (shown.status !== 0) {
+					throw new Error(
+						`Could not read workflow '${file}' at ${ref}: ${shown.stderr.trim() || shown.stdout.trim() || 'git show failed'}`,
+					);
+				}
+				return { file: file.slice(WORKFLOW_DIRECTORY.length + 1), content: shown.stdout };
+			});
+	});
 }
