@@ -22,7 +22,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org/'
 
       - name: Setup Nix
-        uses: DeterminateSystems/nix-installer-action@v22
+        uses: DeterminateSystems/nix-installer-action@v23
 
       - name: Install dependencies
         run: nix develop --command npm ci
